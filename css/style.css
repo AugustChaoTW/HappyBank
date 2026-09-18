@@ -41,18 +41,23 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 /* --- 步驟一：選頭像 --- */
 .step-title { text-align: center; font-size: 1.15rem; color: var(--c-muted); margin-bottom: 16px; }
 
-.avatar-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.avatar-row { display: grid; gap: 12px; }
+.avatar-row.kids { grid-template-columns: repeat(3, 1fr); }
+.avatar-row.parents { grid-template-columns: repeat(2, 1fr); margin-top: 14px; }
+.avatar-row:empty { display: none; }
+
 .avatar-btn {
   background: var(--c-card); border: 3px solid transparent; border-radius: var(--radius);
-  box-shadow: var(--shadow); padding: 22px 10px 18px; cursor: pointer;
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  box-shadow: var(--shadow); padding: 18px 6px 14px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
   transition: transform .12s ease, border-color .12s ease;
 }
 .avatar-btn:active { transform: scale(.96); }
-.avatar-btn .face { font-size: 3rem; line-height: 1; }
-.avatar-btn .name { font-size: 1.15rem; font-weight: 700; }
-.avatar-btn .role { font-size: .8rem; color: var(--c-muted); }
-.avatar-btn.is-parent { border-color: #e4ebe6; }
+.avatar-btn .face { font-size: 2.5rem; line-height: 1; }
+.avatar-btn .name { font-size: 1.05rem; font-weight: 700; }
+.avatar-btn .role { font-size: .72rem; color: var(--c-muted); }
+.avatar-row.parents .avatar-btn { border-color: #e4ebe6; padding: 16px 6px 12px; }
+.avatar-row.parents .face { font-size: 2.1rem; }
 
 /* --- 步驟二：輸入密碼 --- */
 .who {

@@ -5,7 +5,8 @@
   const views = ['pick', 'pw', 'home'];
   const el = id => document.getElementById(id);
 
-  const avatarGrid = el('avatar-grid');
+  const kidsRow = el('avatar-kids');
+  const parentsRow = el('avatar-parents');
   const dotsWrap = el('dots');
   const msgKid = el('msg-kid');
   const msgParent = el('msg-parent');
@@ -21,17 +22,20 @@
   }
 
   // --- 步驟一：頭像 ---
+  // 小孩一排、家長一排
   function renderAvatars(users) {
-    avatarGrid.innerHTML = '';
+    kidsRow.innerHTML = '';
+    parentsRow.innerHTML = '';
     users.forEach(u => {
+      const isParent = u.role === 'parent';
       const btn = document.createElement('button');
-      btn.className = 'avatar-btn' + (u.role === 'parent' ? ' is-parent' : '');
+      btn.className = 'avatar-btn';
       btn.innerHTML = `
         <span class="face">${u.emoji}</span>
         <span class="name">${u.displayName}</span>
-        <span class="role">${u.role === 'parent' ? '家長' : '小小存款人'}</span>`;
+        <span class="role">${isParent ? '家長' : '小小存款人'}</span>`;
       btn.addEventListener('click', () => pickUser(u));
-      avatarGrid.appendChild(btn);
+      (isParent ? parentsRow : kidsRow).appendChild(btn);
     });
   }
 
