@@ -23,20 +23,34 @@ const SCHEMA = {
   requests: ['id', 'ts', 'kidId', 'kind', 'amount', 'choreId', 'fromAccountId',
              'toAccountId', 'note', 'status', 'decidedTs', 'decidedNote', 'clientId',
              'photoFileId', 'decidedBy', 'decidedProxy', 'checklist'],
-  chores: ['id', 'title', 'icon', 'reward', 'repeat', 'kidId', 'active'],
+  // description（做法說明）是後來補上的第八欄，一樣「接在最後面」，理由同上。
+  // 注意 seedTable 只補「第一欄的鍵不存在」的整列，不會回頭補既有列的新欄位——
+  // 線上 Sheet 裡已經存在的家事，description 會是空白，要家長自己打進去（SPEC §5）。
+  chores: ['id', 'title', 'icon', 'reward', 'repeat', 'kidId', 'active', 'description'],
   config: ['key', 'value', 'note']
 };
 
 // 家事清單初版。kidId 空白 = 誰都可以接。
 // 定價原則：一件 5~20 元，對照每週 50 元零用錢——做三件 ≈ 半週零用錢，
 // 讓「勞動」與「等零用錢」的比重有感但不失衡。之後在 admin 頁隨時可改。
+//
+// 最後一欄是「做法說明」：一句寫給小孩看的、具體到可以自己檢查的標準。
+// 「倒垃圾」在大人腦裡跟在六歲小孩腦裡不是同一件事——沒有寫下來，
+// 他只能猜，拍一張照，然後被退回，學到的是「這系統很任性」而不是那個標準。
+// 寫一次，省掉每週一次的退回（SPEC §9.5）。
 const CHORES_SEED = [
-  ['chore-trash',   '倒垃圾',         '🗑️', 10, 'daily',  '', true],
-  ['chore-dishes',  '收碗盤',         '🍽️', 10, 'daily',  '', true],
-  ['chore-pets',    '餵魚／澆花',     '🐟',  5, 'daily',  '', true],
-  ['chore-sweep',   '掃地',           '🧹', 15, 'weekly', '', true],
-  ['chore-laundry', '摺自己的衣服',   '👕', 15, 'weekly', '', true],
-  ['chore-room',    '整理自己的房間', '🛏️', 20, 'weekly', '', true]
+  ['chore-trash',   '倒垃圾',         '🗑️', 10, 'daily',  '', true,
+   '廚房跟浴室兩個桶子都要倒，倒完記得換新袋子'],
+  ['chore-dishes',  '收碗盤',         '🍽️', 10, 'daily',  '', true,
+   '桌上的碗、盤子、杯子都拿去水槽，先沖過水再疊好'],
+  ['chore-pets',    '餵魚／澆花',     '🐟',  5, 'daily',  '', true,
+   '魚飼料一小匙就好，不要倒太多；陽台的花澆到土變深色'],
+  ['chore-sweep',   '掃地',           '🧹', 15, 'weekly', '', true,
+   '客廳跟餐桌底下都要掃，椅子先搬開，垃圾掃進畚箕倒掉'],
+  ['chore-laundry', '摺自己的衣服',   '👕', 15, 'weekly', '', true,
+   '自己的衣服摺好、分上衣跟褲子放進抽屜，襪子兩隻收成一組'],
+  ['chore-room',    '整理自己的房間', '🛏️', 20, 'weekly', '', true,
+   '棉被摺好、玩具收回箱子、地板看得到空地，桌上只留檯燈']
 ];
 
 const CONFIG_SEED = [

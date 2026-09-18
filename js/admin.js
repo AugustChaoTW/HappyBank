@@ -30,6 +30,9 @@ const Admin = (() => {
   // 但待審清單一定要寫得出「倒垃圾 ＋10 元」。所以：有 chores 就用 chores，
   // 沒有就退回這份與 Setup.gs 種子一致的對照表，再不認得就印 choreId，不要空白。
   const CHORE_FALLBACK = {
+    // 刻意**不放** description：做法說明是家長隨時會在 Sheet 上改的字，
+    // 這份對照表是寫死的舊值。拿舊標準給正在判照片的媽媽看，比不給更糟
+    // （同 §6 對金額的處理：寫錯的數字比不寫更糟）。舊快照就少一行，不要猜。
     'chore-trash': { title: '倒垃圾', icon: '🗑️', reward: 10 },
     'chore-dishes': { title: '收碗盤', icon: '🍽️', reward: 10 },
     'chore-pets': { title: '餵魚／澆花', icon: '🐟', reward: 5 },
@@ -127,6 +130,23 @@ const Admin = (() => {
     const chore = r.kind === 'chore_done' ? choreOf(snap, r) : null;
     if (chore) return `${chore.icon || '🧹'} ${chore.title}`;
     return `${kindLabel(r.kind)}${r.choreId ? '（' + r.choreId + '）' : ''}`;
+  }
+
+  // 這件家事當初訂的標準（chores.description，§9.5）。媽媽在判照片的時候，
+  // 要看得到她自己寫下來的那句話——否則她只能憑當下的印象judge，
+  // 而小孩被退回的理由就會每週不一樣。不是家事、沒寫說明，一律空字串。
+  function rowDescription(snap, req) {
+    const r = req || {};
+    if (r.kind !== 'chore_done') return '';
+    const chore = choreOf(snap, r);
+    return String((chore && chore.description) || '').trim();
+  }
+
+  // 家長自己打進 Sheet 的自由文字，會直接進 innerHTML，所以一定要 esc()。
+  // 空的就整行不畫——待審清單很密，寧可少一行也不要多一個空框。
+  function descriptionHtml(snap, req) {
+    const text = rowDescription(snap, req);
+    return text ? `<p class="adm-desc">${esc(text)}</p>` : '';
   }
 
   // 金額一律自己算，**不要用 pending 的 req.amount**：簽到那筆在核准前是空字串，
@@ -417,6 +437,7 @@ const Admin = (() => {
           <div class="adm-info">
             <p class="adm-title">${esc(title)} ${amt}</p>
             <p class="adm-sub">${esc(kid.emoji || '🧒')} ${esc(kid.displayName || kid.userId)} · ${esc(when(req.ts))}</p>
+            ${descriptionHtml(snapshot, req)}
             ${checks}
             ${note}
           </div>
@@ -830,7 +851,7 @@ const Admin = (() => {
     // 純函式，給測試與其他頁用
     groupRequests, pendingCount, approverName, initialRow, startSend, applyDecideResult,
     needsRefresh, canSubmit, decidePayload, buttonLabel, errorMessage, summarizeBatch,
-    kindLabel, rowTitle, rowAmount, dailyAllowanceOf, photoState,
+    kindLabel, rowTitle, rowAmount, rowDescription, descriptionHtml, dailyAllowanceOf, photoState,
     parseChecklist, checklistLine, pendingByKind
   };
 })();

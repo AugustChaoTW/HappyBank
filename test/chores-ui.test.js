@@ -189,3 +189,87 @@ test('availableCount / pendingReward / homeButtonState 都吃伺服器的今天'
   assert.strictEqual(Chores.homeButtonState([DAILY], [r], WRONG_CLOCK).label, '還有 1 件可以做 →');
   assert.strictEqual(Chores.homeButtonState([DAILY], [r], WRONG_CLOCK, SNAP_TODAY).label, '⏳ 1 件等確認');
 });
+
+// ---------- 做法說明（description，§6、§9.5） ----------
+// 卡片上那一行「怎麼算做完」是家長寫一次就不用再退回的東西。
+// 它是家長打進 Sheet 的自由文字，會直接落進 innerHTML——所以一定要跳脫。
+
+test('descriptionHtml：有說明就畫成一行從屬的小字', () => {
+  const html = Chores.descriptionHtml({ id: 'trash', description: '兩個桶子都要倒，倒完換新袋子' });
+  assert.match(html, /chore-desc/);
+  assert.match(html, /兩個桶子都要倒，倒完換新袋子/);
+});
+
+test('descriptionHtml：沒有說明就什麼都不畫（不留空行、不留標點）', () => {
+  ['', '   ', null, undefined].forEach(v => {
+    assert.strictEqual(Chores.descriptionHtml({ id: 'x', description: v }), '',
+      '空的說明不能留下任何殘骸：' + JSON.stringify(v));
+  });
+  assert.strictEqual(Chores.descriptionHtml({ id: 'x' }), '');
+  assert.strictEqual(Chores.descriptionHtml(null), '');
+});
+
+test('descriptionHtml：家長打的 HTML 字元要跳脫，不能變成標籤', () => {
+  const html = Chores.descriptionHtml({ id: 'x', description: '<b>兩個</b> "桶子" & 洗手台' });
+  assert.ok(html.indexOf('<b>') === -1, '不能把家長打的字當成 HTML 跑');
+  assert.match(html, /&lt;b&gt;/);
+  assert.match(html, /&quot;桶子&quot;/);
+  assert.match(html, /&amp; 洗手台/);
+});
+
+test('descriptionHtml：前後空白修掉，不要在卡片上留一段縮排', () => {
+  assert.match(Chores.descriptionHtml({ id: 'x', description: '  倒完換袋子  ' }), />倒完換袋子</);
+});
+
+
+// ---------- 做法說明在家長端（js/admin.js，§6、§9.5） ----------
+// 同一句標準要出現在兩邊：小孩做之前看得到，媽媽核准時也看得到。
+// 這幾個 case 放在這裡跟小孩端的並排，改動任何一邊都會有人發現另一邊漏了。
+
+const Admin = loadBrowserModule('js/admin.js', 'Admin');
+
+function admSnap(over) {
+  return Object.assign({
+    ok: true,
+    user: { userId: 'aug', role: 'parent' },
+    chore_approver: 'vicky',
+    kids: [], requests: []
+  }, over);
+}
+
+function admReq(over) {
+  return Object.assign({
+    id: 'r1', kind: 'chore_done', kidId: 'momo', choreId: 'chore-trash',
+    status: 'pending', ts: taipei('2026-09-18T20:00:00'), photoFileId: 'f1'
+  }, over);
+}
+
+
+// ---------------------------------------------------------------- 做法說明（§6、§9.5）
+// 媽媽在看照片時要看得到「她自己當初訂的標準」，否則她也只能憑印象judge。
+
+test('rowDescription：家事那筆帶得出 chores.description', () => {
+  const s = admSnap({ chores: [{ id: 'chore-trash', title: '倒垃圾', icon: '🗑️', reward: 10, description: '兩個桶子都要倒' }] });
+  assert.strictEqual(Admin.rowDescription(s, admReq()), '兩個桶子都要倒');
+});
+
+test('rowDescription：沒有說明、不是家事、認不得的 choreId 都回空字串', () => {
+  const s = admSnap({ chores: [{ id: 'chore-trash', title: '倒垃圾', reward: 10, description: '' }] });
+  assert.strictEqual(Admin.rowDescription(s, admReq()), '');
+  assert.strictEqual(Admin.rowDescription(s, admReq({ kind: 'allowance_claim', choreId: '' })), '');
+  assert.strictEqual(Admin.rowDescription(s, admReq({ choreId: 'chore-nope' })), '');
+  assert.strictEqual(Admin.rowDescription(s, null), '');
+  assert.strictEqual(Admin.rowDescription(null, admReq()), '');
+  assert.strictEqual(Admin.rowDescription(admSnap({ chores: [{ id: 'chore-trash', title: '倒垃圾' }] }), admReq()), '');
+});
+
+test('descriptionHtml：空的不畫，有的畫一行小字，HTML 字元要跳脫', () => {
+  const s = admSnap({ chores: [{ id: 'chore-trash', title: '倒垃圾', reward: 10, description: '<b>兩個</b>桶子 & "換袋子"' }] });
+  assert.strictEqual(Admin.descriptionHtml(admSnap({ chores: [] }), admReq()), '');
+  const html = Admin.descriptionHtml(s, admReq());
+  assert.match(html, /adm-desc/);
+  assert.ok(html.indexOf('<b>') === -1, '家長自己打的字也要跳脫，不能當標籤跑');
+  assert.match(html, /&lt;b&gt;/);
+  assert.match(html, /&amp;/);
+  assert.match(html, /&quot;換袋子&quot;/);
+});

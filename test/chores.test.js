@@ -746,3 +746,61 @@ test('家長快照要帶 chores，待審清單才不會顯示過期的家事名�
   assert.strictEqual(trash.title, '倒廚餘');
   assert.strictEqual(trash.reward, 25);
 });
+
+// ---------------------------------------------------------------- 做法說明（description，§5、§6、§9.5）
+// 「倒垃圾」對家長跟六歲小孩不是同一件事。沒有一句寫下來的標準，
+// 小孩只能猜、拍一張照、被退回——他學到的是「這系統很任性」，不是那個標準。
+// 一句寫一次的做法說明，省掉每週一次的退回。
+
+test('chores 的 schema 有 description，而且接在最後一欄（SPEC §5）', () => {
+  const gs = freshBank();
+  const headers = gs.$.headers('chores');
+  assert.ok(headers.indexOf('description') >= 0, 'chores 少了 description 欄');
+  assert.strictEqual(headers[headers.length - 1], 'description',
+    'description 必須接在最後面：setup() 只重寫表頭不搬資料，插在中間會讓既有列整排錯位');
+  // 既有欄位的順序一格都不能動
+  assert.deepStrictEqual(gs.$.plain(headers.slice(0, 7)),
+    ['id', 'title', 'icon', 'reward', 'repeat', 'kidId', 'active']);
+});
+
+test('六件種子家事都寫了做法說明，且是給小孩看的具體句子（SPEC §5）', () => {
+  const gs = freshBank();
+  const rows = gs.$.rows('chores');
+  assert.strictEqual(rows.length, 6);
+  rows.forEach(c => {
+    const d = String(c.description || '');
+    assert.ok(d.length >= 8, c.id + ' 沒有做法說明（或短到沒有資訊）：' + JSON.stringify(d));
+  });
+  // 倒垃圾要講清楚「幾個桶子、要不要換袋子」——那正是最常被退回的那一件
+  const trash = rows.find(c => c.id === 'chore-trash');
+  assert.match(String(trash.description), /袋子/);
+});
+
+test('小孩 snapshot 的 chores 帶得出 description（卡片才畫得出標準）', () => {
+  const gs = freshBank();
+  const kid = login(gs, 'momo');
+  const snap = gs.$.call({ action: 'snapshot', session: kid });
+  const trash = snap.chores.find(c => c.id === 'chore-trash');
+  assert.ok(trash, '小孩快照要有 chore-trash');
+  assert.ok(String(trash.description || '').length >= 8, '小孩端拿不到做法說明');
+});
+
+test('家長 snapshot 的 chores 也帶 description，而且是 Sheet 上的現值（SPEC §9.5）', () => {
+  const gs = freshBank();
+  const parent = login(gs, 'vicky');
+  const row = gs.$.rows('chores').find(c => c.id === 'chore-dishes')._row;
+  gs.$.setCell('chores', row, 'description', '碗盤沖過再放進洗碗機，鍋子要自己洗');
+
+  const snap = gs.$.call({ action: 'snapshot', session: parent });
+  const dishes = snap.chores.find(c => c.id === 'chore-dishes');
+  assert.strictEqual(dishes.description, '碗盤沖過再放進洗碗機，鍋子要自己洗');
+});
+
+test('description 空白（家長還沒補打）時 snapshot 照樣回得來，不是 undefined 也不是炸掉', () => {
+  const gs = freshBank();
+  const row = gs.$.rows('chores').find(c => c.id === 'chore-pets')._row;
+  gs.$.setCell('chores', row, 'description', '');
+  const snap = gs.$.call({ action: 'snapshot', session: login(gs, 'momo') });
+  const pets = snap.chores.find(c => c.id === 'chore-pets');
+  assert.strictEqual(pets.description, '');
+});

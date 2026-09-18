@@ -299,6 +299,13 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   font-size: .85rem; font-weight: 800; color: var(--c-brand-dark);
   background: #e6f3ea; padding: 5px 10px; border-radius: 999px; white-space: nowrap;
 }
+/* 做法說明：「怎麼樣才算做完」。從屬於標題——小一號、灰一點，
+   小孩掃過去先看到家事名稱，需要的時候才讀這一行。
+   說明是空的時候整個 <p> 不會被畫出來（js/chores.js），所以這裡不留任何保底間距。 */
+.chore-desc {
+  margin-top: 6px; font-size: .85rem; line-height: 1.5;
+  color: var(--c-muted); white-space: pre-line;
+}
 
 /* 四種狀態各給一個顏色，小孩掃一眼就知道哪張還能賺錢 */
 .chore-available { border-left-color: var(--c-brand); }
@@ -401,6 +408,9 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   background: #e6f3ea; padding: 3px 8px; border-radius: 999px; white-space: nowrap;
 }
 .adm-sub { font-size: .82rem; color: var(--c-muted); margin-top: 3px; }
+/* 媽媽當初訂的標準。待審清單很密，所以壓到最小可讀、只佔一行的高度；
+   說明是空的時候這個 <p> 根本不會產生（js/admin.js） */
+.adm-desc { font-size: .8rem; margin-top: 4px; line-height: 1.45; color: var(--c-muted); }
 .adm-kidnote { font-size: .88rem; margin-top: 6px; line-height: 1.5; }
 /* 每日零用錢勾了哪幾項：媽媽核准的就是這一行，字不能比備註小 */
 .adm-checks { font-size: .88rem; margin-top: 6px; line-height: 1.6; color: var(--c-brand-dark); }

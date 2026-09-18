@@ -159,6 +159,16 @@ const Chores = (() => {
 
   // ---------- 畫面 ----------
 
+  // 「怎麼樣才算做完」——家長在 chores.description 寫一次的標準（§9.5）。
+  // 小孩不知道標準就只能猜，猜錯被退回，學到的是「這系統很任性」。
+  // 空的（家長還沒打）就整行不畫：寧可沒有，也不要留一個空框或一個孤單的破折號。
+  // 家長打進 Sheet 的自由文字會直接進 innerHTML，所以一定要 esc()。
+  function descriptionHtml(chore) {
+    const text = String((chore && chore.description) || '').trim();
+    if (!text) return '';
+    return `<p class="chore-desc">${esc(text)}</p>`;
+  }
+
   function choreCard(chore, info) {
     const reward = `+${Money.format(chore.reward)} 元`;
     const id = esc(chore.id);
@@ -171,6 +181,7 @@ const Chores = (() => {
 
     return `<div class="chore chore-${info.state}" data-chore="${id}">
       ${head}
+      ${descriptionHtml(chore)}
       ${bodyFor(chore, info)}
     </div>`;
   }
@@ -517,6 +528,6 @@ const Chores = (() => {
     render: refresh, open, homeButton,
     // 純函式，給測試與其他頁用（零用錢頁沿用 periodKey／friendlyTs／title，兩邊的日界線與稱呼才會一致）
     deriveState, periodKey, currentPeriodKey, availableCount, pendingReward, errorMessage,
-    friendlyTs, homeButtonState, title
+    friendlyTs, homeButtonState, title, descriptionHtml
   };
 })();
