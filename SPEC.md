@@ -90,7 +90,13 @@ Apps Script time-driven trigger，**每月 1 日 00:30（Asia/Taipei）**結算�
 ### 4.3 定存（`term`）
 
 - 開戶時**自由指定期數**（不是從固定選項挑）：小孩在開戶精靈裡自己決定要鎖幾個月，
-  換算成日期寫入 `lockUntil`。合理的上下限還沒定（見 §10）。
+  換算成日期寫入 `lockUntil`。
+- **期數範圍：3～12 個月（含兩端）**，對應 `config.term_months_min` / `term_months_max`。
+  少於 3 個月鎖不出感覺，多於 12 個月對小孩等於天荒地老。
+  這個上下限**必須在伺服器端的 `open_account` 檢查**（超出範圍回 `ok:false`），
+  不能只擋在 UI——前端是公開的，參數改一改就送得出來。
+- 月息 10% 下這兩端的實際差距（`1.1^n`）：3 個月 ≈ 本金 ×1.33、6 個月 ≈ ×1.77、12 個月 ≈ ×3.14。
+  也就是鎖滿一年，錢會變成三倍多——這就是願意等的報酬。
 - 鎖定期間**逐月計息並複利**進該子帳戶。
 - **到期後停止計息**，帳戶轉 `matured` 狀態。首頁跳提醒：
   「🔔 你的定存到期了，記得把錢領回活期繼續生利息！」——教到期管理。
@@ -233,14 +239,15 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 | active | bool | |
 
 ### `config`（key-value 單列表）
-`rate_current` · `rate_term` · `rate_goal` · `rate_gift` · `allowance_weekday`（0-6）·
+`rate_current` · `rate_term` · `rate_goal` · `rate_gift` ·
+`term_months_min`（3）· `term_months_max`（12）·
+`allowance_weekday`（0-6，固定 0＝週日）· `allowance_hour`（8，24 小時制）·
 `session_days_kid` · `session_hours_parent` · `login_max_fail` · `login_lock_minutes` · `pbkdf_rounds` ·
 `approval_mode`（固定 `tiered`，見 §9）· `kid_password_digits`（8）
 
 > 這裡**沒有**每週零用錢金額（在 `users.weeklyAllowance`，逐人設定），
-> 也**沒有**定存期數選項——定存期數是開戶時自由填的（見 §4.3、§9.3）。
-> `Setup.gs` 的 `CONFIG_SEED` 目前仍留有一個未使用的 `term_months_options`，
-> 待改成期數的最小／最大月數上下限（見 §10）。
+> 也**沒有**定存期數的固定選項——期數是開戶時自由填的，只受 `term_months_min` /
+> `term_months_max` 上下限約束，由伺服器端 `open_account` 把關（見 §4.3、§9.3）。
 
 ---
 
@@ -352,7 +359,7 @@ data/
 | `transfer` | from, to, amount | 帳戶間轉帳，**免審，直接入帳**（見 §9.2） |
 | `request` | kind, amount, choreId, note | 建立申請（僅三種 kind） |
 | `cancel_request` | requestId | 小孩自己撤回 |
-| `open_account` | type, name, emoji, termMonths\|targetAmount | 開子帳戶。`termMonths` 由小孩自由填（見 §4.3），不是固定選項 |
+| `open_account` | type, name, emoji, termMonths\|targetAmount | 開子帳戶。`termMonths` 由小孩自由填（見 §4.3），不是固定選項；**伺服器端驗證 3 ≤ termMonths ≤ 12** |
 | `admin_decide` | requestId, decision, note | 核准/退回 |
 | `admin_adjust` | kidId, accountId, amount, memo | 手動入帳/扣款/罰款 |
 | `admin_gift` | kidId, amount, memo | 紅包入 `gift` |
@@ -471,6 +478,8 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 2. 寫出到期金額試算（「會變成 886 元」）——把好處也講清楚，這是誘因。
 3. 明寫罰則：「提前解約的話，利息全部不見。」
 4. 需要**勾選**「我知道要鎖到 12/18」才能按下確認。
+5. 期數選擇器本身要**限制在 3～12 個月**（見 §4.3），讓不可能的值在正常操作下根本選不到；
+   伺服器端仍會再擋一次，UI 的限制只是不要讓小孩白填。
 
 家長仍可從 admin 手動調帳救援，但那是例外處理，不是常態流程。
 
@@ -480,6 +489,9 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
   被退回時**必須看到家長寫的理由**（`decidedNote` 退回時為必填）。
 - 家長端 admin 待審清單：三種 kind 混在同一條時間軸，支援逐筆核准與**全選核准**。
   首頁顯示待審數量 badge。
+- **週日早上＝對帳日**：零用錢發完後，家長端 admin 首頁跳出「本週待審 ○ 件」的提醒。
+  核准因此變成每週一次的固定儀式，家長不會被小孩隨時催，小孩也知道什麼時候會有答案。
+  急件仍可隨時核准，只是不必天天看。
 - 核准時寫 ledger，`refId` 指向 requestId；退回不寫 ledger。
 
 ---
@@ -487,16 +499,14 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 ## 10. 待決事項 🔴
 
 - 小孩人數與名單、年齡（影響 UI 用字）
-- 每個小孩的 `weeklyAllowance` 金額（逐人設定）、發放日（星期幾，全家共用 `allowance_weekday`）
+- 每個小孩的 `weeklyAllowance` 金額（逐人設定）
 - 家事清單初始內容與定價
-- **定存期數的上下限**：期數改成開戶時自由填之後，仍需要一個合理範圍
-  （最少幾個月才有意義、最多幾個月才不會把小孩鎖到天荒地老；月息 10% 下 6 個月 = 本金 ×1.77）。
-  決定後把 `Setup.gs` 的 `term_months_options` 改成 min/max 兩個 config key
 - 🔴 **`credentials` 的存放位置**：現在密碼雜湊與帳本同在一份 Sheet，
   隱藏 + 保護只擋編輯不擋讀取（見 §5、§8.1）。在決定前的鐵則是**這份 Sheet 不分享給任何人**；
   若之後真的需要讓家人看帳，要先把 `credentials` 搬到另一份不分享的試算表，
   或確定一律走 app 的家長模式
-- 是否要「消費紀錄」——提領後小孩回報實際買了什麼（教記帳，但會增加摩擦）
+- 🔴 **是否要「消費紀錄」**——提領後小孩回報實際買了什麼（教記帳，但會增加摩擦）。
+  **仍在待討論**，v1 不實作、不設計資料欄位
 
 ---
 
@@ -506,7 +516,7 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 |---|---|---|
 | **M1 骨架** ✅ *（差後端部署）* | Sheet 建表、Apps Script `snapshot` + `admin_adjust`、前端 home 顯示餘額 | 家長手動入帳，小孩手機看得到 |
 | **M2 核心流** | 轉帳、開子帳戶（定存/目標）、交易明細 | 紅包 → 活期 → 定存 全鏈路走得通 |
-| **M3 自動化** | 每週零用錢 trigger、每月計息 trigger、到期提醒 | 跨月測試利息正確、定存到期轉 matured |
+| **M3 自動化** | 每週零用錢 trigger（**週日早上 8:00**，同時是對帳日，見 §9.4）、每月計息 trigger、到期提醒 | 跨月測試利息正確、定存到期轉 matured |
 | **M4 審核** | requests（三種 kind）+ admin 待審清單 | 小孩申請提領 → 家長核准 → 入帳；退回看得到理由 |
 | **M5 離線與韌性** | IndexedDB queue + clientId 冪等 + 快照新鮮度 | 飛航模式操作 → 復網自動補送且不重複入帳 |
 | **M6 家事與獎勵** | chores 清單、回報流程 | 小孩回報 → 家長核准 → 入帳 |
@@ -518,7 +528,7 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
   `admin_adjust` · `admin_gift` · `admin_recalc` · `change_password`，
   加上 script lock、`clientId` 冪等、首次登入自動開 `current` / `gift` 帳戶。
 - 前端已實作：登入頁（8 位數字鍵盤）、**餘額頁**（帳戶卡 + 總資產 + 離線快取）。
-- **尚未實作**：M3 的兩個 time-driven trigger（每週零用錢、每月計息），
+- **尚未實作**：M3 的兩個 time-driven trigger（每週零用錢＝週日早上 8:00、每月計息），
   以及 §7.2 的 `transfer` · `request` · `cancel_request` · `open_account` ·
   `admin_decide` · `admin_config` · `admin_revoke_session`。
 - 前端的邏輯 401 處理（收到 `error:'unauthorized'` 就清 session 導回登入頁，§7.4）已接上，
@@ -543,7 +553,10 @@ M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持�
 - [ ] 開定存確認頁顯示「解鎖日期」大字 + 到期金額，未勾選不能按確認
 - [ ] 提領／家事／解約送出後顯示「等爸爸媽媽確認中」，可自行撤回
 - [ ] 家長退回申請時必須填理由，小孩看得到
-- [ ] 每週零用錢依各小孩的 `users.weeklyAllowance` 發放，金額可以人人不同
+- [ ] 期數選擇器只給得出 3～12 個月；`open_account` 對期數小於 3 或大於 12 的請求一律拒絕，
+      **即使繞過 UI 手動組請求送出也擋得住**
+- [ ] 每週零用錢依各小孩的 `users.weeklyAllowance` 於**週日早上 8:00** 發放，金額可以人人不同
+- [ ] 週日發完零用錢後，家長端 admin 首頁看得到「本週待審 ○ 件」提醒
 - [ ] 跨月結算：活期與定存各自依正確利率複利
 - [ ] 定存到期 → 停止計息 + 首頁提醒
 - [ ] 飛航模式送出轉帳 → 復網自動補送，**且只入帳一次**

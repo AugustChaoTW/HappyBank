@@ -1,7 +1,7 @@
 // 全站設定
 const CONFIG = {
   // Apps Script Web App URL（M1 部署後填入；空字串 = 尚未接後端，登入頁只跑 UI）
-  apiUrl: '',
+  apiUrl: 'https://script.google.com/macros/s/AKfycbyVd41Y63_OOsCODF3WJLjkAP79Y6H9ckrArZ6i6x-6TtWHsp7of0Si1wRySn6QkNHn/exec',
   // 與 Apps Script 內 TOKEN 一致的共享密鑰。這只是雜訊過濾，不是安全機制——
   // 真正的身分驗證是登入拿到的 session。
   apiToken: 'hb-10c4cc80462d2b4c',
