@@ -119,7 +119,7 @@ Apps Script time-driven trigger，**每月 1 日 00:30（Asia/Taipei）**結算�
 `https://docs.google.com/spreadsheets/d/1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo/edit`
 Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 
-分頁與表頭**不要手動建立**——schema 的唯一定義來源是 `apps-script/Setup.gs` 的 `SCHEMA` 常數，
+`credentials` 分頁會被自動隱藏並加保護。分頁與表頭**不要手動建立**——schema 的唯一定義來源是 `apps-script/Setup.gs` 的 `SCHEMA` 常數，
 在 Apps Script 編輯器執行 `setup()` 即可建好（可重複執行，不動既有資料）。
 
 
@@ -130,13 +130,23 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 | role | enum | `kid` / `parent` |
 | displayName | string | 顯示名 |
 | emoji | string | 👧 |
-| salt | string | 16 字元隨機鹽 |
-| passwordHash | string | 見 §8.1，**Sheet 內不存明文密碼** |
 | weeklyAllowance | int | 每週零用錢金額（parent 為 0） |
 | active | bool | 停用後無法登入 |
 | lastLoginTs | datetime | |
+
+### `credentials`（密碼獨立分頁）
+
+**密碼與個資分開放。** 這張表由 `setup()` 自動**隱藏並加上保護**（只有擁有者可編輯），
+如此一來就算之後把 Sheet 分享給小孩或其他家人看帳，也碰不到任何人的密碼雜湊。
+
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| userId | string | 對應 `users.userId` |
+| salt | string | 16 字元隨機鹽，每次改密碼重新產生 |
+| passwordHash | string | 見 §8.1，**不存明文** |
 | failedCount | int | 連續登入失敗次數 |
 | lockedUntil | datetime\|null | 鎖定到期時間 |
+| updatedTs | datetime | 最後一次改密碼時間 |
 
 ### `sessions`
 | 欄位 | 型別 | 說明 |
@@ -331,8 +341,10 @@ data/
    對家用場景足夠，但**不要重用家裡其他地方的密碼**。
 3. **session token 由伺服器產生**，存 `sessions` 分頁；前端放 localStorage。
    過期或被踢掉 → API 回 `401` → 前端清除並導回登入頁。
-4. 登入失敗 5 次鎖 15 分鐘，記在 `users.lockedUntil`。
-5. 沒有「家長 PIN」了——家長就是一個 `role = parent` 的帳號，權限一律由伺服器依 session 判定。
+4. **密碼放在獨立的 `credentials` 分頁**，由 `setup()` 隱藏並設保護（僅擁有者可編輯）。
+   `users` 分頁只有暱稱、角色、零用錢等非機密欄位，可以安心分享。
+5. 登入失敗 5 次鎖 15 分鐘，記在 `credentials.lockedUntil`。
+6. 沒有「家長 PIN」了——家長就是一個 `role = parent` 的帳號，權限一律由伺服器依 session 判定。
 2. **另開一支獨立的 Apps Script 專案 + 另一組 token。**
    penghu-explorer 的 token 已經公開在 GitHub 上，不能讓它同時開得了銀行的門。
    同一個 Google 帳號，不同專案、不同密鑰。
