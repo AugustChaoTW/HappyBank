@@ -1,0 +1,129 @@
+:root {
+  --c-brand: #2e9e5b;
+  --c-brand-dark: #1b7a42;
+  --c-gold: #f6a723;
+  --c-bg: #f2f7f3;
+  --c-card: #ffffff;
+  --c-text: #23302a;
+  --c-muted: #7b8a81;
+  --c-danger: #d84343;
+  --radius: 20px;
+  --shadow: 0 4px 14px rgba(24, 60, 40, 0.10);
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  min-height: 100%;
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+  background: var(--c-bg);
+  color: var(--c-text);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+body { display: flex; flex-direction: column; min-height: 100vh; }
+
+.view {
+  flex: 1; width: 100%; max-width: 480px; margin: 0 auto;
+  padding: 24px 20px 8px;
+  display: flex; flex-direction: column;
+}
+.hidden { display: none !important; }
+
+/* --- 品牌 --- */
+.brand { text-align: center; margin: 12px 0 28px; }
+.brand-mark { font-size: 3.4rem; line-height: 1; }
+.brand h1 { font-size: 1.7rem; color: var(--c-brand-dark); margin-top: 6px; letter-spacing: 0.02em; }
+.brand p { color: var(--c-muted); font-size: 0.95rem; margin-top: 6px; }
+
+/* --- 步驟一：選頭像 --- */
+.step-title { text-align: center; font-size: 1.15rem; color: var(--c-muted); margin-bottom: 16px; }
+
+.avatar-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.avatar-btn {
+  background: var(--c-card); border: 3px solid transparent; border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 22px 10px 18px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  transition: transform .12s ease, border-color .12s ease;
+}
+.avatar-btn:active { transform: scale(.96); }
+.avatar-btn .face { font-size: 3rem; line-height: 1; }
+.avatar-btn .name { font-size: 1.15rem; font-weight: 700; }
+.avatar-btn .role { font-size: .8rem; color: var(--c-muted); }
+.avatar-btn.is-parent { border-color: #e4ebe6; }
+
+/* --- 步驟二：輸入密碼 --- */
+.who {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  margin-bottom: 18px;
+}
+.who .face { font-size: 2.6rem; }
+.who .name { font-size: 1.4rem; font-weight: 700; }
+
+.dots { display: flex; justify-content: center; gap: 12px; margin: 4px 0 8px; }
+.dot {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; border: 2px solid #cfdcd4;
+}
+.dot.filled { background: var(--c-brand); border-color: var(--c-brand); }
+
+.pw-field {
+  display: flex; gap: 8px; align-items: center; margin: 8px 0 4px;
+}
+.pw-field input {
+  flex: 1; font-size: 1.3rem; padding: 16px 18px; border-radius: 14px;
+  border: 2px solid #d6e2da; background: #fff; font-family: inherit;
+}
+.pw-field input:focus { outline: none; border-color: var(--c-brand); }
+.pw-field button {
+  font-size: 1.4rem; padding: 14px; border: none; background: none; cursor: pointer;
+}
+
+.msg { min-height: 24px; text-align: center; font-size: .95rem; margin: 10px 0 2px; }
+.msg.error { color: var(--c-danger); font-weight: 700; }
+.msg.info { color: var(--c-muted); }
+
+.shake { animation: shake .34s ease; }
+@keyframes shake {
+  10%, 90% { transform: translateX(-3px); }
+  30%, 70% { transform: translateX(6px); }
+  50% { transform: translateX(-8px); }
+}
+
+/* --- 數字鍵盤 --- */
+.keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 8px; }
+.key {
+  font-size: 1.9rem; font-weight: 600; font-family: inherit;
+  padding: 18px 0; border: none; border-radius: 18px;
+  background: var(--c-card); box-shadow: var(--shadow); cursor: pointer; color: var(--c-text);
+  transition: transform .08s ease, background .08s ease;
+}
+.key:active { transform: scale(.94); background: #e6f3ea; }
+.key.util { font-size: 1.2rem; background: transparent; box-shadow: none; color: var(--c-muted); }
+
+.btn-primary {
+  width: 100%; margin-top: 16px; padding: 18px; font-size: 1.2rem; font-weight: 700;
+  font-family: inherit; color: #fff; background: var(--c-brand); border: none;
+  border-radius: 18px; box-shadow: var(--shadow); cursor: pointer;
+}
+.btn-primary:disabled { background: #b9cfc1; box-shadow: none; }
+
+.btn-text {
+  margin: 18px auto 0; padding: 12px; background: none; border: none;
+  color: var(--c-muted); font-size: 1rem; font-family: inherit;
+  text-decoration: underline; cursor: pointer;
+}
+
+/* --- 登入成功（暫時的佔位頁）--- */
+.placeholder { text-align: center; padding: 40px 0; }
+.placeholder .big { font-size: 3.4rem; }
+.placeholder h2 { font-size: 1.5rem; margin: 12px 0 8px; }
+.placeholder p { color: var(--c-muted); line-height: 1.7; }
+
+.app-footer {
+  text-align: center; font-size: .78rem; color: #9aa89f;
+  padding: 20px 12px 24px;
+}
+.app-footer a { color: #9aa89f; }

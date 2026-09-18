@@ -126,7 +126,7 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 ### `users`（登入帳號，取代原本的 `kids`）
 | 欄位 | 型別 | 說明 |
 |---|---|---|
-| userId | string | 同時是帳號與 kidId：`momo` / `coco` / `dodo` / `parent` |
+| userId | string | 同時是帳號與 kidId。**一律小寫儲存，登入比對 `toLowerCase()`，大小寫不敏感** |
 | role | enum | `kid` / `parent` |
 | displayName | string | 顯示名 |
 | emoji | string | 👧 |

@@ -99,6 +99,7 @@ function assertPasswordOk(role, password) {
 // role: 'kid' | 'parent'
 function upsertUser(userId, role, displayName, emoji, password, weeklyAllowance) {
   assertPasswordOk(role, password);
+  userId = String(userId).trim().toLowerCase(); // 帳號一律小寫，登入時大小寫不敏感
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sh = ss.getSheetByName('users');
   const rounds = Number(getConfig('pbkdf_rounds')) || 1000;
@@ -107,7 +108,7 @@ function upsertUser(userId, role, displayName, emoji, password, weeklyAllowance)
                weeklyAllowance || 0, true, '', 0, ''];
 
   const ids = sh.getLastRow() > 1
-    ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().map(r => String(r[0]))
+    ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().map(r => String(r[0]).toLowerCase())
     : [];
   const idx = ids.indexOf(userId);
   if (idx === -1) {

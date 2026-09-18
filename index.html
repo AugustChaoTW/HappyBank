@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>HappyBank 快樂銀行</title>
+  <meta name="theme-color" content="#2e9e5b">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏦</text></svg>">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- 登入：步驟一 選頭像 -->
+  <section id="view-pick" class="view">
+    <div class="brand">
+      <div class="brand-mark">🏦</div>
+      <h1>快樂銀行</h1>
+      <p>存起來的錢，每個月都會長大</p>
+    </div>
+    <p class="step-title">你是誰？</p>
+    <div id="avatar-grid" class="avatar-grid"></div>
+  </section>
+
+  <!-- 登入：步驟二 輸入密碼 -->
+  <section id="view-pw" class="view hidden">
+    <div class="who">
+      <span class="face" id="pw-face"></span>
+      <span class="name" id="pw-name"></span>
+    </div>
+
+    <!-- 小孩：8 顆圓點 + 數字鍵盤 -->
+    <div id="pw-kid">
+      <div id="dots" class="dots"></div>
+      <p class="msg info" id="msg-kid">輸入你的 8 個數字密碼</p>
+      <div class="keypad">
+        <button class="key" data-k="1">1</button>
+        <button class="key" data-k="2">2</button>
+        <button class="key" data-k="3">3</button>
+        <button class="key" data-k="4">4</button>
+        <button class="key" data-k="5">5</button>
+        <button class="key" data-k="6">6</button>
+        <button class="key" data-k="7">7</button>
+        <button class="key" data-k="8">8</button>
+        <button class="key" data-k="9">9</button>
+        <button class="key util" data-k="clear">清除</button>
+        <button class="key" data-k="0">0</button>
+        <button class="key util" data-k="back">⌫</button>
+      </div>
+    </div>
+
+    <!-- 家長：一般密碼欄 -->
+    <div id="pw-parent" class="hidden">
+      <div class="pw-field">
+        <input type="password" id="pw-input" placeholder="密碼" autocomplete="current-password"
+               inputmode="text" enterkeyhint="go">
+        <button type="button" id="btn-reveal" aria-label="顯示密碼">👁️</button>
+      </div>
+      <p class="msg info" id="msg-parent">請輸入家長密碼</p>
+      <button class="btn-primary" id="btn-login">登入</button>
+    </div>
+
+    <button class="btn-text" id="btn-switch">← 換一個人</button>
+  </section>
+
+  <!-- 登入成功後的佔位頁（帳戶頁尚未實作，見 SPEC M1）-->
+  <section id="view-home" class="view hidden">
+    <div class="placeholder">
+      <div class="big">🎉</div>
+      <h2 id="home-hello"></h2>
+      <p>帳戶頁還在蓋。<br>下一步是 SPEC 的 M1：餘額與帳戶卡。</p>
+    </div>
+    <button class="btn-text" id="btn-logout">登出</button>
+  </section>
+
+  <footer class="app-footer">
+    🏦 快樂銀行 · <span id="version-info">版本載入中…</span>
+  </footer>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/login.js"></script>
+  <script src="js/version.js"></script>
+</body>
+</html>
