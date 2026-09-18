@@ -812,3 +812,29 @@ test('dailyAllowance 格子被清空 → snapshot 回 0，不是 NaN 也不是�
   setDailyAllowance(t.gs, 'momo', '');
   assert.strictEqual(t.gs.$.call({ action: 'snapshot', session: t.momo }).dailyAllowance, 0);
 });
+
+// ------------------------------------------ 家長端也要拿得到每個小孩的 dailyAllowance
+// 待審清單上的簽到那筆，`requests.amount` 在 pending 階段是空的（§7.1、§9.6 四），
+// 金額要到核准當下才查得出來。家長端沒有這個欄位的話，待審清單只能猜一個數字
+// ——而顯示錯的金額比不顯示更糟。所以逐個小孩帶下來。
+
+test('家長 snapshot 的 kids 逐人帶 dailyAllowance（待審清單要印簽到金額）', () => {
+  const t = bank();
+  setDailyAllowance(t.gs, 'momo', 35);
+  setDailyAllowance(t.gs, 'coco', 12);
+
+  const snap = t.gs.$.call({ action: 'snapshot', session: t.vicky });
+  assert.strictEqual(snap.ok, true, JSON.stringify(snap));
+  const byId = {};
+  snap.kids.forEach(k => { byId[k.user.userId] = k; });
+  assert.strictEqual(byId.momo.dailyAllowance, 35);
+  assert.strictEqual(byId.coco.dailyAllowance, 12, '是每個小孩自己那一列，不是全家一個數字');
+});
+
+test('家長 snapshot：dailyAllowance 沒填就是 0，不是 NaN 也不是空字串', () => {
+  const t = bank();
+  setDailyAllowance(t.gs, 'momo', '');
+  const snap = t.gs.$.call({ action: 'snapshot', session: t.vicky });
+  const momo = snap.kids.find(k => k.user.userId === 'momo');
+  assert.strictEqual(momo.dailyAllowance, 0);
+});

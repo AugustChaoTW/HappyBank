@@ -454,7 +454,11 @@ function apiSnapshot(p) {
       const accounts = accountsOf(k.userId);
       return {
         user: publicUser(k), accounts,
-        total: accounts.reduce((n, a) => n + a.balance, 0)
+        total: accounts.reduce((n, a) => n + a.balance, 0),
+        // 待審清單要印出簽到那筆是多少錢，但 requests.amount 在 pending 階段是空的
+        // （核准當下才查 users.dailyAllowance 回寫，§9.6 四）。家長端沒有這個值，
+        // 清單就只能猜——而顯示錯的金額比不顯示更糟（SPEC §7.1）。
+        dailyAllowance: Math.round(num(k.dailyAllowance, 0))
       };
     });
   return {

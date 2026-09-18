@@ -10,7 +10,17 @@ const Admin = (() => {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g,
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  const KIND_LABEL = { chore_done: '家事', withdraw: '領現金', term_break: '定存解約' };
+  const KIND_LABEL = {
+    chore_done: '家事', allowance_claim: '每日零用錢',
+    withdraw: '領現金', term_break: '定存解約'
+  };
+
+  // 有照片證據的那幾種。判斷「這筆該不該有照片」用 kind，
+  // 但「要不要去抓縮圖」一律看 photoFileId——多一種 kind 就不必再改一次 thumb()。
+  const PHOTO_KINDS = { chore_done: true, allowance_claim: true };
+
+  // 全選核准的排列順序：週日對帳日先批簽到（每天一筆、量最大），家事其次（§6）。
+  const BATCH_ORDER = ['allowance_claim', 'chore_done'];
 
   // 退回理由的一鍵範本。家長在手機上打字很痛苦，打不出來就會亂按核准——
   // 而「看不懂的退回」比不退回更傷（§9.4）。
@@ -29,6 +39,10 @@ const Admin = (() => {
   };
 
   // ---------- 純函式：分組、狀態機、翻譯（可單元測試） ----------
+
+  // 不認得的 kind 也要印得出東西（原字串），但認得的絕不可以漏——
+  // 家長看到「allowance_claim」等於看不到這筆是什麼。
+  const kindLabel = kind => KIND_LABEL[kind] || String(kind == null ? '' : kind);
 
   const tsOf = r => (r && r.ts ? Date.parse(r.ts) : NaN) || 0;
   const isPending = r => r && r.status === 'pending';
@@ -69,6 +83,95 @@ const Admin = (() => {
         g.items.sort((a, b) => tsOf(b) - tsOf(a));
         return g;
       });
+  }
+
+  // 全選核准分成「按類型」兩批（§6）。混在一起批的話，媽媽按下去會連她根本
+  // 沒看過的那一種也一起放行——簽到看的是勾選紀錄，家事看的是照片，證據不同。
+  // 只有一筆的類型不給鈕：那顆鈕只會讓人手滑，直接按那一列就好。
+  function pendingByKind(snap) {
+    const byKind = {};
+    const seen = [];
+    groupRequests(snap).forEach(g => g.items.forEach(r => {
+      const kind = String(r.kind || '');
+      if (!byKind[kind]) { byKind[kind] = []; seen.push(kind); }
+      byKind[kind].push(r.id);
+    }));
+    const order = BATCH_ORDER.filter(k => byKind[k]).concat(seen.filter(k => BATCH_ORDER.indexOf(k) < 0));
+    return order
+      .filter(k => byKind[k].length > 1)
+      .map(k => ({ kind: k, ids: byKind[k], label: `${kindLabel(k)}（${byKind[k].length} 筆）` }));
+  }
+
+  // 這筆是哪一件家事。家長端 snapshot 帶 chores 全表；沒帶（舊快照）才退回對照表。
+  function choreOf(snap, req) {
+    const list = (snap && snap.chores) || [];
+    const hit = list.find(c => String(c.id) === String(req && req.choreId));
+    return hit || CHORE_FALLBACK[String(req && req.choreId)] || null;
+  }
+
+  // 這個小孩每天領多少。家長端 snapshot 逐人帶下來（§7.1）；
+  // 舊快照沒有就回 0，畫面寧可不寫數字，也不要寫錯的數字。
+  function dailyAllowanceOf(snap, kidId) {
+    const id = String(kidId || '').toLowerCase();
+    if (!id) return 0;
+    const hit = ((snap && snap.kids) || []).find(k =>
+      String(((k && k.user) || {}).userId || '').toLowerCase() === id);
+    if (!hit) return 0;
+    const raw = hit.dailyAllowance != null ? hit.dailyAllowance : ((hit.user || {}).dailyAllowance);
+    return Math.round(Number(raw) || 0);
+  }
+
+  function rowTitle(snap, req) {
+    const r = req || {};
+    if (r.kind === 'allowance_claim') return `🌞 ${kindLabel(r.kind)}`;
+    const chore = r.kind === 'chore_done' ? choreOf(snap, r) : null;
+    if (chore) return `${chore.icon || '🧹'} ${chore.title}`;
+    return `${kindLabel(r.kind)}${r.choreId ? '（' + r.choreId + '）' : ''}`;
+  }
+
+  // 金額一律自己算，**不要用 pending 的 req.amount**：簽到那筆在核准前是空字串，
+  // 伺服器核准當下才查 users.dailyAllowance 回寫（§7.1、§9.6 四）。
+  function rowAmount(snap, req) {
+    const r = req || {};
+    if (r.kind === 'allowance_claim') return dailyAllowanceOf(snap, r.kidId);
+    const chore = r.kind === 'chore_done' ? choreOf(snap, r) : null;
+    if (chore) return Math.round(Number(chore.reward) || 0);
+    return Math.round(Number(r.amount) || 0);
+  }
+
+  // 縮圖的狀態。**看的是 photoFileId，不是 kind**——簽到也有照片，
+  // 以前這裡寫死 chore_done，簽到那幾筆就永遠畫不出證據。
+  function photoState(req, cached) {
+    const r = req || {};
+    if (!r.photoFileId) return PHOTO_KINDS[r.kind] ? 'missing' : 'none';
+    if (cached === 'error') return 'error';
+    return cached ? 'ready' : 'loading';
+  }
+
+  // requests.checklist 是伺服器寫的原字串。目前寫「項目|項目|項目」，
+  // 但也吃得下「項目=1」那種寫法——解析不出來一律當成沒勾，
+  // 把沒做到的事畫成勾起來比空白更糟，而且不管多壞的值都不准讓清單炸掉。
+  function parseChecklist(value) {
+    const raw = Array.isArray(value)
+      ? value
+      : (typeof value === 'string' ? value.split('|') : []);
+    const out = [];
+    raw.forEach(part => {
+      const s = String(part == null ? '' : part).trim();
+      if (!s) return;
+      const eq = s.lastIndexOf('=');
+      if (eq < 0) { out.push(s); return; }
+      const name = s.slice(0, eq).trim();
+      const on = s.slice(eq + 1).trim().toLowerCase();
+      if (name && (on === '1' || on === 'true' || on === 'yes' || on === 'y')) out.push(name);
+    });
+    return out;
+  }
+
+  // 媽媽要核對的就是這一行。沒有紀錄要明講——空白會被當成「畫面壞了」而被忽略。
+  function checklistLine(value) {
+    const items = parseChecklist(value);
+    return items.length ? items.map(i => '✓ ' + i).join('　') : '（沒有勾選紀錄）';
   }
 
   // 「代替 ⟨誰⟩ 確認」要寫真名。snapshot 只保證頂層有 chore_approver 這個 userId，
@@ -162,8 +265,9 @@ const Admin = (() => {
 
   function summarizeBatch(state, approver) {
     const s = state || {};
-    if (!s.stopped) return `全部核准完成，共 ${s.done || 0} 件`;
-    return `已核准 ${s.done || 0} / ${s.total || 0} 件，卡在第 ${(s.done || 0) + 1} 件：` +
+    const what = s.label ? s.label + '：' : '';     // 按類型全選，要講清楚剛剛批的是哪一類
+    if (!s.stopped) return `${what}全部核准完成，共 ${s.done || 0} 件`;
+    return `${what}已核准 ${s.done || 0} / ${s.total || 0} 件，卡在第 ${(s.done || 0) + 1} 件：` +
       errorMessage(s.error, s.message, approver);
   }
 
@@ -184,12 +288,6 @@ const Admin = (() => {
   const fmt = n => (typeof Money !== 'undefined' ? Money.format(n) : String(n));
   const when = iso => (typeof Chores !== 'undefined' ? Chores.friendlyTs(iso) : String(iso || ''));
 
-  function choreOf(req) {
-    const list = (snapshot && snapshot.chores) || [];
-    const hit = list.find(c => String(c.id) === String(req.choreId));
-    return hit || CHORE_FALLBACK[String(req.choreId)] || null;
-  }
-
   function newClientId() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID().toLowerCase();
     return ('hb-' + Date.now().toString(16) + '-' + Math.random().toString(16).slice(2, 10)).toLowerCase();
@@ -200,12 +298,17 @@ const Admin = (() => {
   // 所以捲進畫面才排隊，而且一次只抓一張（§6、§7.6）。
 
   function thumb(req) {
-    if (req.kind !== 'chore_done') return '<div class="adm-thumb none">—</div>';
-    if (!req.photoFileId) return '<div class="adm-thumb bad">沒有照片</div>';
     const cached = photoCache.get(req.id);
-    if (cached === 'error') return '<div class="adm-thumb bad">照片讀不到</div>';
-    if (cached) return `<img class="adm-thumb" src="${esc(cached)}" alt="家事照片" data-zoom="${esc(req.id)}">`;
-    return `<div class="adm-thumb loading" data-photo="${esc(req.id)}"><span class="spin"></span></div>`;
+    const alt = req.kind === 'allowance_claim' ? '每日零用錢照片' : '家事照片';
+    switch (photoState(req, cached)) {
+      case 'none': return '<div class="adm-thumb none">—</div>';
+      case 'missing': return '<div class="adm-thumb bad">沒有照片</div>';
+      case 'error': return '<div class="adm-thumb bad">照片讀不到</div>';
+      case 'ready':
+        return `<img class="adm-thumb" src="${esc(cached)}" alt="${esc(alt)}" data-zoom="${esc(req.id)}">`;
+      default:
+        return `<div class="adm-thumb loading" data-photo="${esc(req.id)}"><span class="spin"></span></div>`;
+    }
   }
 
   const queue = [];
@@ -284,12 +387,13 @@ const Admin = (() => {
 
   function requestRow(req, kid) {
     const row = rowOf(req.id);
-    const chore = req.kind === 'chore_done' ? choreOf(req) : null;
-    const title = chore ? `${chore.icon || '🧹'} ${chore.title}`
-      : `${KIND_LABEL[req.kind] || req.kind}${req.choreId ? '（' + req.choreId + '）' : ''}`;
-    const amount = chore ? Number(chore.reward) || 0 : Number(req.amount) || 0;
+    const title = rowTitle(snapshot, req);
+    const amount = rowAmount(snapshot, req);
     const amt = amount ? `<span class="adm-amt">＋${fmt(amount)} 元</span>` : '';
     const note = req.note ? `<p class="adm-kidnote">小孩備註：${esc(req.note)}</p>` : '';
+    // 勾了什麼才是媽媽在核准的東西，比照片還重要——照片可以糊，這行不能沒有。
+    const checks = req.kind === 'allowance_claim'
+      ? `<p class="adm-checks">${esc(checklistLine(req.checklist))}</p>` : '';
 
     const state = row.phase === 'done'
       ? `<p class="adm-result ok">${row.result === 'rejected' ? '已退回' : '已核准'}</p>`
@@ -313,6 +417,7 @@ const Admin = (() => {
           <div class="adm-info">
             <p class="adm-title">${esc(title)} ${amt}</p>
             <p class="adm-sub">${esc(kid.emoji || '🧒')} ${esc(kid.displayName || kid.userId)} · ${esc(when(req.ts))}</p>
+            ${checks}
             ${note}
           </div>
         </div>
@@ -417,8 +522,9 @@ const Admin = (() => {
           <p class="adm-hero-label">本週待審</p>
           <p class="adm-hero-num">${n} <small>件</small></p>
         </div>
-        ${n > 1 ? `<button class="btn-primary adm-all" id="btn-approve-all"
-          ${batch && batch.running ? 'disabled' : ''}>全選核准</button>` : ''}
+        <div class="adm-all-wrap">${pendingByKind(snap).map(b =>
+          `<button class="btn-primary adm-all" data-approve-all="${esc(b.kind)}"
+            ${batch && batch.running ? 'disabled' : ''}>全選核准 ${esc(b.label)}</button>`).join('')}</div>
       </div>
       ${batchLine}
       ${list}
@@ -479,12 +585,15 @@ const Admin = (() => {
 
   // 全選核准：**一定要序列**。後端每次寫入都搶同一把 script lock，
   // 平行送只會讓大家互相 busy（§7.3）。中途失敗就停下來講清楚，不要默默跳過。
-  async function approveAll() {
-    const ids = groupRequests(snapshot).reduce((all, g) => all.concat(g.items.map(r => r.id)), [])
-      .filter(id => rowOf(id).phase !== 'done');
+  // 而且**只批一種 kind**（§6）：簽到看勾選紀錄、家事看照片，兩種證據不一樣，
+  // 一顆鈕同時放行兩種等於讓媽媽核准她沒看過的那一種。
+  async function approveAll(kind) {
+    const hit = pendingByKind(snapshot).find(b => b.kind === kind);
+    if (!hit) return;
+    const ids = hit.ids.filter(id => rowOf(id).phase !== 'done');
     if (!ids.length) return;
 
-    batch = { done: 0, total: ids.length, running: true };
+    batch = { done: 0, total: ids.length, running: true, label: hit.label };
     setMsg('');
     paint();
 
@@ -676,7 +785,8 @@ const Admin = (() => {
       const doReject = hit('[data-do-reject]');
       if (doReject) return decide(doReject.dataset.doReject, 'reject');
 
-      if (hit('#btn-approve-all')) return approveAll();
+      const all = hit('[data-approve-all]');
+      if (all) return approveAll(all.dataset.approveAll);
       if (hit('#btn-adjust')) { e.preventDefault(); return submitAdjust(); }
       if (hit('#btn-gift')) { e.preventDefault(); return submitGift(); }
     });
@@ -719,6 +829,8 @@ const Admin = (() => {
     open, back, refresh, parentBody,
     // 純函式，給測試與其他頁用
     groupRequests, pendingCount, approverName, initialRow, startSend, applyDecideResult,
-    needsRefresh, canSubmit, decidePayload, buttonLabel, errorMessage, summarizeBatch
+    needsRefresh, canSubmit, decidePayload, buttonLabel, errorMessage, summarizeBatch,
+    kindLabel, rowTitle, rowAmount, dailyAllowanceOf, photoState,
+    parseChecklist, checklistLine, pendingByKind
   };
 })();

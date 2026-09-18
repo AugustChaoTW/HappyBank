@@ -221,3 +221,184 @@ test('summarizeBatch：全部成功 / 中途卡住都要講清楚', () => {
   assert.match(stopped, /4/);
   assert.match(stopped, /代替|Vicky/);
 });
+
+// ---------------------------------------------------- 兩種 kind 混排（§6、§7.1）
+// 每日零用錢簽到與家事走的是同一條待審清單。看不出是哪一種、看不到勾了什麼、
+// 看不到照片，媽媽就只能憑感覺按核准——那等於沒有審核。
+
+function claimReq(over) {
+  return Object.assign(req({
+    id: 'c1', kind: 'allowance_claim', choreId: '', photoFileId: 'pf1',
+    amount: '',                    // 伺服器 pending 階段一律留空（§7.1）
+    checklist: '好好照顧自己|尊重別人的需求|完成自己的工作'
+  }), over);
+}
+
+function snapWithAllowance(over) {
+  const s = snap(over);
+  s.kids = [
+    { user: { userId: 'momo', displayName: 'Momo', emoji: '👧' }, accounts: [], total: 100, dailyAllowance: 20 },
+    { user: { userId: 'coco', displayName: 'Coco', emoji: '👧' }, accounts: [], total: 50, dailyAllowance: 12 }
+  ];
+  return s;
+}
+
+test('kindLabel：allowance_claim 要寫成「每日零用錢」，不要印原始 kind 字串', () => {
+  assert.strictEqual(Admin.kindLabel('allowance_claim'), '每日零用錢');
+  assert.strictEqual(Admin.kindLabel('chore_done'), '家事');
+  assert.strictEqual(Admin.kindLabel('withdraw'), '領現金');
+  // 不認得的還是要印得出東西，不要空白
+  assert.strictEqual(Admin.kindLabel('weird_kind'), 'weird_kind');
+});
+
+test('rowTitle：簽到寫「每日零用錢」，家事寫家事名稱', () => {
+  const s = snapWithAllowance();
+  assert.match(Admin.rowTitle(s, claimReq()), /每日零用錢/);
+  assert.ok(!/allowance_claim/.test(Admin.rowTitle(s, claimReq())), '不能露出原始 kind');
+  assert.match(Admin.rowTitle(s, req()), /倒垃圾/);
+});
+
+// ---- 金額：pending 的 amount 是空的，要去查那個小孩的 dailyAllowance
+
+test('rowAmount：pending 的簽到用該小孩的 dailyAllowance，不是 req.amount', () => {
+  const s = snapWithAllowance();
+  assert.strictEqual(Admin.rowAmount(s, claimReq({ kidId: 'momo' })), 20);
+  assert.strictEqual(Admin.rowAmount(s, claimReq({ kidId: 'coco' })), 12, '每個小孩的金額不同');
+});
+
+test('rowAmount：家事還是看 chores.reward（前端不採信 req.amount）', () => {
+  const s = snapWithAllowance({ chores: [{ id: 'chore-trash', title: '倒垃圾', icon: '🗑️', reward: 99 }] });
+  assert.strictEqual(Admin.rowAmount(s, req({ amount: 5 })), 99);
+});
+
+test('rowAmount：查不到小孩的 dailyAllowance 就回 0——寧可不寫數字，也不要寫錯的', () => {
+  const s = snapWithAllowance();
+  assert.strictEqual(Admin.rowAmount(s, claimReq({ kidId: 'dodo' })), 0);
+  assert.strictEqual(Admin.rowAmount(snap(), claimReq()), 0, '舊的家長快照沒帶 dailyAllowance');
+  assert.strictEqual(Admin.rowAmount(null, claimReq()), 0);
+});
+
+test('dailyAllowanceOf：大小寫不同的 kidId 也要對得上', () => {
+  const s = snapWithAllowance();
+  assert.strictEqual(Admin.dailyAllowanceOf(s, 'MOMO'), 20);
+  assert.strictEqual(Admin.dailyAllowanceOf(s, ''), 0);
+  assert.strictEqual(Admin.dailyAllowanceOf(s, 'nobody'), 0);
+});
+
+// ---- 照片：看的是有沒有 photoFileId，不是 kind
+
+test('photoState：有 photoFileId 就要抓縮圖，簽到與家事一視同仁', () => {
+  assert.strictEqual(Admin.photoState(claimReq()), 'loading');
+  assert.strictEqual(Admin.photoState(req()), 'loading');
+});
+
+test('photoState：該有照片卻沒有 photoFileId → missing；別的 kind 沒照片才是 none', () => {
+  assert.strictEqual(Admin.photoState(claimReq({ photoFileId: '' })), 'missing');
+  assert.strictEqual(Admin.photoState(req({ photoFileId: '' })), 'missing');
+  assert.strictEqual(Admin.photoState({ kind: 'withdraw', id: 'w1' }), 'none');
+});
+
+test('photoState：抓過的用快取，抓壞的講「照片讀不到」而不是破圖', () => {
+  assert.strictEqual(Admin.photoState(claimReq(), 'data:image/jpeg;base64,AAA'), 'ready');
+  assert.strictEqual(Admin.photoState(claimReq(), 'error'), 'error');
+});
+
+// ---- 勾選紀錄：這才是媽媽要核對的證據
+
+test('parseChecklist：伺服器目前寫的是「項目|項目|項目」', () => {
+  assert.deepStrictEqual(plain(Admin.parseChecklist('好好照顧自己|尊重別人的需求|完成自己的工作')),
+    ['好好照顧自己', '尊重別人的需求', '完成自己的工作']);
+});
+
+test('parseChecklist：也吃得下「項目=1」的寫法，0 的那項不算勾到', () => {
+  assert.deepStrictEqual(plain(Admin.parseChecklist('好好照顧自己=1|尊重別人的需求=1')),
+    ['好好照顧自己', '尊重別人的需求']);
+  assert.deepStrictEqual(plain(Admin.parseChecklist('甲=1|乙=0|丙=true|丁=false')), ['甲', '丙']);
+});
+
+test('parseChecklist：壞資料一律回空陣列，不能讓整張待審清單炸掉', () => {
+  ['', null, undefined, '|||', '  ', 0].forEach(v => {
+    assert.deepStrictEqual(plain(Admin.parseChecklist(v)), [], JSON.stringify(v));
+  });
+  assert.deepStrictEqual(plain(Admin.parseChecklist({ nope: 1 })), []);
+  assert.deepStrictEqual(plain(Admin.parseChecklist(['甲', '乙'])), ['甲', '乙'], '陣列也收');
+});
+
+test('checklistLine：沒有勾選紀錄要明講，不要留一片空白', () => {
+  assert.strictEqual(Admin.checklistLine(''), '（沒有勾選紀錄）');
+  assert.strictEqual(Admin.checklistLine('亂七八糟的東西=0'), '（沒有勾選紀錄）');
+  assert.match(Admin.checklistLine('甲|乙'), /甲/);
+  assert.match(Admin.checklistLine('甲|乙'), /乙/);
+});
+
+// ---- 分組、排序、狀態機、退回規則對兩種 kind 一視同仁
+
+test('groupRequests：簽到與家事混在同一個小孩底下，一樣照時間新到舊', () => {
+  const s = snapWithAllowance({ requests: [
+    req({ id: 'a', ts: taipei('2026-09-18T08:00:00') }),
+    claimReq({ id: 'b', kidId: 'momo', ts: taipei('2026-09-18T21:00:00') }),
+    claimReq({ id: 'c', kidId: 'coco', ts: taipei('2026-09-18T07:00:00') })
+  ] });
+  const groups = Admin.groupRequests(s);
+  assert.deepStrictEqual(plain(groups.map(g => g.kid.userId)), ['momo', 'coco']);
+  assert.deepStrictEqual(plain(groups[0].items.map(r => r.id)), ['b', 'a']);
+});
+
+test('pendingCount：簽到也算一件待審', () => {
+  assert.strictEqual(Admin.pendingCount(snapWithAllowance({ requests: [
+    req({ id: 'a' }), claimReq({ id: 'b' }), claimReq({ id: 'c', status: 'approved' })
+  ] })), 2);
+});
+
+test('簽到也走同一套代理狀態機與「退回要寫理由」', () => {
+  let row = Admin.initialRow();
+  assert.deepStrictEqual(plain(Admin.decidePayload('c1', 'approve', row)),
+    { requestId: 'c1', decision: 'approve', decidedNote: '' });
+  row = Admin.applyDecideResult(Admin.startSend(row), { ok: false, error: 'needs-proxy' });
+  assert.strictEqual(row.proxy, true);
+  assert.deepStrictEqual(plain(Admin.decidePayload('c1', 'approve', row)),
+    { requestId: 'c1', decision: 'approve', decidedNote: '', proxy: true });
+  // 退回沒理由一樣送不出去
+  assert.strictEqual(Admin.decidePayload('c1', 'reject', row), null);
+  const withNote = Object.assign({}, row, { note: '照片看不出來' });
+  assert.deepStrictEqual(plain(Admin.decidePayload('c1', 'reject', withNote)),
+    { requestId: 'c1', decision: 'reject', decidedNote: '照片看不出來', proxy: true });
+});
+
+// ---- 按類型全選（§6）：混在一起批會讓媽媽一鍵放行她沒看過的那一種
+
+test('pendingByKind：分成兩批，每批照小孩分組後的順序，簽到排前面', () => {
+  const s = snapWithAllowance({ requests: [
+    req({ id: 'a', ts: taipei('2026-09-18T08:00:00') }),
+    claimReq({ id: 'b', kidId: 'momo', ts: taipei('2026-09-18T21:00:00') }),
+    claimReq({ id: 'c', kidId: 'coco', ts: taipei('2026-09-18T07:00:00') }),
+    req({ id: 'd', kidId: 'coco', ts: taipei('2026-09-18T06:00:00') })
+  ] });
+  const batches = Admin.pendingByKind(s);
+  assert.deepStrictEqual(plain(batches.map(b => b.kind)), ['allowance_claim', 'chore_done']);
+  assert.deepStrictEqual(plain(batches[0].ids), ['b', 'c']);
+  assert.deepStrictEqual(plain(batches[1].ids), ['a', 'd']);
+  assert.match(batches[0].label, /每日零用錢/);
+  assert.match(batches[0].label, /2/);
+});
+
+test('pendingByKind：只有一筆的那一類不給全選鈕（按一次就好，全選只會讓人手滑）', () => {
+  const s = snapWithAllowance({ requests: [req({ id: 'a' }), claimReq({ id: 'b' })] });
+  assert.deepStrictEqual(plain(Admin.pendingByKind(s)), []);
+  assert.deepStrictEqual(plain(Admin.pendingByKind(null)), []);
+});
+
+test('pendingByKind：不認得的 kind 也要能全選，不要讓它卡在清單上', () => {
+  const s = snapWithAllowance({ requests: [
+    req({ id: 'a', kind: 'withdraw', amount: 100 }),
+    req({ id: 'b', kind: 'withdraw', amount: 50 })
+  ] });
+  const batches = Admin.pendingByKind(s);
+  assert.deepStrictEqual(plain(batches.map(b => b.kind)), ['withdraw']);
+  assert.match(batches[0].label, /領現金/);
+});
+
+test('summarizeBatch：講得出剛剛批的是哪一類', () => {
+  assert.match(Admin.summarizeBatch({ done: 3, total: 3, label: '每日零用錢' }), /每日零用錢/);
+  assert.match(Admin.summarizeBatch({ done: 3, total: 3, label: '每日零用錢' }), /3/);
+});

@@ -206,7 +206,10 @@ test('家長 snapshot 看得到全家，而且形狀符合 SPEC §7.1', () => {
   assert.strictEqual(snap.kids.length, 2);
   const momo = snap.kids.find(k => k.user.userId === 'momo');
   assert.strictEqual(momo.total, 300);
-  assert.deepStrictEqual(Object.keys(momo).sort(), ['accounts', 'total', 'user']);
+  // dailyAllowance 逐人帶：待審清單上的簽到那筆在 pending 階段沒有金額（§7.1）
+  assert.deepStrictEqual(Object.keys(momo).sort(),
+    ['accounts', 'dailyAllowance', 'total', 'user']);
+  assert.strictEqual(momo.dailyAllowance, 20);
 });
 
 test('whoami 只回公開欄位', () => {

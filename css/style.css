@@ -376,7 +376,9 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 .adm-hero-label { font-size: .85rem; color: var(--c-muted); }
 .adm-hero-num { font-size: 2.2rem; font-weight: 800; line-height: 1.1; color: var(--c-brand-dark); }
 .adm-hero-num small { font-size: .9rem; color: var(--c-muted); }
-.adm-hero .adm-all { margin: 0 0 0 auto; width: auto; padding: 14px 18px; min-height: 48px; font-size: 1rem; }
+/* 按類型全選（§6）：一種 kind 一顆鈕，兩顆就直式疊起來，手機上不要互相擠成兩行字 */
+.adm-all-wrap { margin-left: auto; display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.adm-hero .adm-all { margin: 0; width: auto; padding: 12px 16px; min-height: 48px; font-size: .95rem; }
 .adm-batch {
   background: #fff8e6; color: #7a5300; border-radius: 14px; padding: 10px 14px;
   font-size: .9rem; font-weight: 700; margin-bottom: 12px;
@@ -400,6 +402,8 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 }
 .adm-sub { font-size: .82rem; color: var(--c-muted); margin-top: 3px; }
 .adm-kidnote { font-size: .88rem; margin-top: 6px; line-height: 1.5; }
+/* 每日零用錢勾了哪幾項：媽媽核准的就是這一行，字不能比備註小 */
+.adm-checks { font-size: .88rem; margin-top: 6px; line-height: 1.6; color: var(--c-brand-dark); }
 .adm-result { font-size: .88rem; font-weight: 700; margin-top: 8px; line-height: 1.5; }
 .adm-result.ok { color: var(--c-brand-dark); }
 .adm-result.warn { color: var(--c-danger); }
