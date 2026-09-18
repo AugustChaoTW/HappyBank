@@ -10,7 +10,9 @@
 
 ## 現況
 
-規格討論階段，尚未開始實作。
+M1 骨架程式碼已完成（登入／snapshot／家長調帳、餘額頁），**尚未部署後端**——
+把 Apps Script 部署成 Web App 並把網址填進 `js/config.js` 的 `apiUrl` 就會活過來。
+細節見 [SPEC §11](SPEC.md#11-開發階段) 與 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
 ## 資料庫
 
@@ -21,11 +23,16 @@ Google Sheet「HappyBank 資料庫」 — [開啟](https://docs.google.com/sprea
 
 初始化步驟：
 
-1. Sheet → 擴充功能 → Apps Script，貼上 `apps-script/Setup.gs`
+1. Sheet → 擴充功能 → Apps Script，貼上 `apps-script/Config.gs`、`Code.gs`、`Setup.gs`
+   三個檔（`SHEET_ID` / `TOKEN` 只在 `Config.gs` 宣告一次）
 2. 執行 `setup()` → 建好 users / credentials / sessions / accounts / ledger / requests / chores / config 八個分頁
    （`credentials` 會自動隱藏並加保護）
 3. 改掉 `seedUsers()` 裡的 `CHANGE-ME` 密碼後執行 → 建立全家帳號
 4. **執行完把密碼從程式碼清掉，不要 commit 真實密碼**
 
-登入帳號存在 `users` 分頁；**密碼雜湊放在獨立的 `credentials` 分頁**，自動隱藏並加保護，
-這樣 Sheet 可以安心分享給家人看帳（見 SPEC §8.1）。
+登入帳號存在 `users` 分頁；**密碼雜湊放在獨立的 `credentials` 分頁**，自動隱藏並加保護。
+
+> 🔴 **這份 Sheet 不要分享給任何人。** Google Sheets 的保護只擋編輯、不擋讀取——
+> 被分享的人（即使只是檢視者）可以建立副本或用 API 讀走隱藏的 `credentials`，
+> 再離線爆破小孩的 8 位數字密碼。家人要看帳請給一個家長帳號走 app 的家長模式
+> （見 [SPEC §5 / §8.1](SPEC.md#5-資料模型google-sheet一分頁一表)）。

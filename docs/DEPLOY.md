@@ -291,7 +291,7 @@ Apps Script 的 Web App 網址對應的是一個**凍結的版本快照**，不�
    **不要**把它當成安全邊界，也不要重用到別的專案。
 3. **真正的防線有兩道**：
    - **session**：身分一律由伺服器查 `sessions` 分頁判定，前端送什麼 `kidId` 都沒用
-     （snapshot 的 `kid` 以 session 決定，Momo 改參數也看不到 Coco 的帳）；
+     （snapshot 回傳的 `user` 與帳戶一律以 session 決定，Momo 改參數也看不到 Coco 的帳）；
      所有 `admin_*` 由伺服器檢查 `session.role === 'parent'`，前端的隱藏選單只是裝飾。
    - **伺服器端計算**：前端從不送 `balance`，只送 `amount` 與 `accountId`，
      所有金額變動都在 `Code.gs` 裡算完才寫 `ledger`。改 localStorage 改不出錢來。

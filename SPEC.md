@@ -89,7 +89,8 @@ Apps Script time-driven trigger，**每月 1 日 00:30（Asia/Taipei）**結算�
 
 ### 4.3 定存（`term`）
 
-- 開戶時指定**期數**：1 / 3 / 6 個月 → 寫入 `lockUntil`。
+- 開戶時**自由指定期數**（不是從固定選項挑）：小孩在開戶精靈裡自己決定要鎖幾個月，
+  換算成日期寫入 `lockUntil`。合理的上下限還沒定（見 §10）。
 - 鎖定期間**逐月計息並複利**進該子帳戶。
 - **到期後停止計息**，帳戶轉 `matured` 狀態。首頁跳提醒：
   「🔔 你的定存到期了，記得把錢領回活期繼續生利息！」——教到期管理。
@@ -109,7 +110,8 @@ Apps Script time-driven trigger，**每月 1 日 00:30（Asia/Taipei）**結算�
 
 月息 5% 複利 = 年化約 1.8 倍；定存月息 10% = 年化約 3.1 倍。錢會膨脹得比直覺快。
 建議家長把**每週零用錢金額設低一點**，讓利息真的成為主要成長來源——這正是我們想教的東西。
-利率與零用錢金額皆在 `config` 分頁可調，隨時可以整家調降。
+利率在 `config` 分頁可調（整家一起）；**每週零用錢則是逐個小孩設定**，
+存在 `users.weeklyAllowance`（見 §5），可以依年齡給不同金額，沒有全家共用的單一數字。
 
 ---
 
@@ -130,7 +132,7 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 | role | enum | `kid` / `parent` |
 | displayName | string | 顯示名 |
 | emoji | string | 👧 |
-| weeklyAllowance | int | 每週零用錢金額（parent 為 0） |
+| weeklyAllowance | int | **每週零用錢金額，逐人設定**（parent 為 0）。這是每個小孩的固定參數，不在 `config`，改某個小孩不影響其他人 |
 | active | bool | 停用後無法登入 |
 | lastLoginTs | datetime | |
 
@@ -232,7 +234,13 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 
 ### `config`（key-value 單列表）
 `rate_current` · `rate_term` · `rate_goal` · `rate_gift` · `allowance_weekday`（0-6）·
-`session_days_kid` · `session_hours_parent` · `login_max_fail` · `login_lock_minutes` · `pbkdf_rounds` · `term_months_options` · `approval_mode`（固定 `tiered`，見 §9）· `kid_password_digits`（8）
+`session_days_kid` · `session_hours_parent` · `login_max_fail` · `login_lock_minutes` · `pbkdf_rounds` ·
+`approval_mode`（固定 `tiered`，見 §9）· `kid_password_digits`（8）
+
+> 這裡**沒有**每週零用錢金額（在 `users.weeklyAllowance`，逐人設定），
+> 也**沒有**定存期數選項——定存期數是開戶時自由填的（見 §4.3、§9.3）。
+> `Setup.gs` 的 `CONFIG_SEED` 目前仍留有一個未使用的 `term_months_options`，
+> 待改成期數的最小／最大月數上下限（見 §10）。
 
 ---
 
@@ -257,8 +265,10 @@ js/
   app.js                路由與主流程
   version.js            照抄（footer 顯示 commit hash）
 apps-script/
-  Code.gs               doGet / doPost / 每月計息 trigger / 每週零用錢 trigger
-  appsscript.json
+  Config.gs             SHEET_ID / TOKEN（同專案共用全域範圍，只能宣告一次）
+  Code.gs               doGet / doPost / 登入 / snapshot / 家長操作 / 密碼雜湊
+                        （每月計息、每週零用錢 trigger 屬 M3，尚未實作）
+  Setup.gs              建分頁與種子資料、建帳號（只在編輯器手動執行）
 data/
   (無 — 所有資料來自 API)
 ```
@@ -271,11 +281,11 @@ data/
   「這個月預計利息 ○○ 元」誘導存錢，待審/到期提醒 badge。
 - **account**：單一帳戶詳情 + 轉帳 + 提領申請。
 - **chores**：家事清單，點「我做完了 ✋」。
-- **goals**：開新子帳戶精靈（選 定存 or 目標 → 填目的 → 選期數/目標金額 → 試算「到期會變成 ○○ 元」）。
+- **goals**：開新子帳戶精靈（選 定存 or 目標 → 填目的 → **自己決定要鎖幾個月**／填目標金額 → 試算「到期會變成 ○○ 元」）。
   **試算畫面是關鍵轉換點**，要把 10% 的威力視覺化。
 - **history**：全帳戶交易明細，可依帳戶篩選。
 - **admin**：僅 `role = parent` 的 session 可進入（伺服器判定，前端只是隱藏入口）。
-  待審清單一鍵核准/退回、手動調帳、改零用錢、編家事、看 `sessions` 踢掉裝置。
+  待審清單一鍵核准/退回、手動調帳、**逐個小孩改每週零用錢**（`users.weeklyAllowance`）、編家事、看 `sessions` 踢掉裝置。
 
 ---
 
@@ -342,11 +352,11 @@ data/
 | `transfer` | from, to, amount | 帳戶間轉帳，**免審，直接入帳**（見 §9.2） |
 | `request` | kind, amount, choreId, note | 建立申請（僅三種 kind） |
 | `cancel_request` | requestId | 小孩自己撤回 |
-| `open_account` | type, name, emoji, termMonths\|targetAmount | 開子帳戶 |
+| `open_account` | type, name, emoji, termMonths\|targetAmount | 開子帳戶。`termMonths` 由小孩自由填（見 §4.3），不是固定選項 |
 | `admin_decide` | requestId, decision, note | 核准/退回 |
 | `admin_adjust` | kidId, accountId, amount, memo | 手動入帳/扣款/罰款 |
 | `admin_gift` | kidId, amount, memo | 紅包入 `gift` |
-| `admin_config` | key, value | 改利率/零用錢/家事 |
+| `admin_config` | key, value | 改 `config` 的利率等設定；改某個小孩的零用錢是改 `users.weeklyAllowance` |
 | `admin_revoke_session` | token | 踢掉某台裝置 |
 | `change_password` | oldPassword, newPassword | 自己改密碼 |
 
@@ -357,7 +367,7 @@ data/
 - **每個寫入請求必須帶 `clientId`（前端產生的 uuid）。**
   伺服器寫入前先查 `ledger` / `requests` 是否已有相同 `clientId`，有就直接回傳原結果。
   沒有這個，離線佇列重送會造成重複入帳——**這是整個系統最容易出事的地方**。
-- 所有寫入以 `LockService.getScriptLock()` 包住（等待上限 10 秒）。
+- 所有寫入以 `LockService.getScriptLock()` 包住（等待上限 15 秒，逾時回 `error:'busy'`，見 §7.4）。
   Apps Script 沒有交易，兩台手機同時送會算錯 `balanceAfter`。
 - 每次寫入後重算並回寫 `accounts.balance`；提供 `admin_recalc` 從 ledger 全量重建校驗。
 
@@ -394,8 +404,10 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 2. **帳號存在 Sheet 的 `users` 分頁，密碼只存雜湊，不存明文。**
    Apps Script 沒有 bcrypt，採**加鹽 SHA-256 迭代**（`pbkdf_rounds` 預設 1000 次）：
    `hash = iterate(base64(SHA256(salt + ':' + password)), rounds)`。
-   這道防線擋的是「小孩翻開 Sheet 看到明文密碼」，不是擋外部攻擊者離線暴力破解——
-   對家用場景足夠，但**不要重用家裡其他地方的密碼**。
+   這道防線擋的是「不小心翻開 Sheet 看到明文密碼」，**不是**擋離線暴力破解：
+   8 位數字只有 1 億種組合，拿到 `credentials` 副本的人在自己電腦上幾秒就能跑完。
+   線上的 5 次鎖定對離線破解完全無效。所以 `credentials` 的存取控制（§5）才是真正的防線，
+   而且**不要重用家裡其他地方的密碼**。
 3. **session token 由伺服器產生**，存 `sessions` 分頁；前端放 localStorage。
    過期或被踢掉 → API 回邏輯 401（`ok:false, error:'unauthorized'`，見 §7.4）
    → 前端清除 session 並導回登入頁。
@@ -448,12 +460,14 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 
 ### 9.3 免審的代價：定存要擋一次
 
-分級的風險是小孩一時興起把所有錢鎖進 6 個月定存，隔天想買東西才後悔。
+分級的風險是小孩一時興起把所有錢鎖進一筆長期定存，隔天想買東西才後悔。
+**期數是開戶時自己填的、不是從 1/3/6 個月挑**，所以「鎖太久」比原本更容易發生——
 既然不要家長核准，**摩擦就必須放在 UI 上**：
 
 開定存的最後一步是確認頁，且必須做到——
 
 1. 用大字寫出**解鎖日期**（「要到 2026 年 12 月 18 日才能拿出來」），不是寫「6 個月」。
+   期數自由填之後這點更重要——小孩對「10 個月」沒有感覺，對「明年 7 月」才有。
 2. 寫出到期金額試算（「會變成 886 元」）——把好處也講清楚，這是誘因。
 3. 明寫罰則：「提前解約的話，利息全部不見。」
 4. 需要**勾選**「我知道要鎖到 12/18」才能按下確認。
@@ -473,9 +487,15 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 ## 10. 待決事項 🔴
 
 - 小孩人數與名單、年齡（影響 UI 用字）
-- 每週零用錢預設金額、發放日（星期幾）
+- 每個小孩的 `weeklyAllowance` 金額（逐人設定）、發放日（星期幾，全家共用 `allowance_weekday`）
 - 家事清單初始內容與定價
-- 定存期數選項（目前預設 1 / 3 / 6 個月；月息 10% 下 6 個月 = 本金 ×1.77）
+- **定存期數的上下限**：期數改成開戶時自由填之後，仍需要一個合理範圍
+  （最少幾個月才有意義、最多幾個月才不會把小孩鎖到天荒地老；月息 10% 下 6 個月 = 本金 ×1.77）。
+  決定後把 `Setup.gs` 的 `term_months_options` 改成 min/max 兩個 config key
+- 🔴 **`credentials` 的存放位置**：現在密碼雜湊與帳本同在一份 Sheet，
+  隱藏 + 保護只擋編輯不擋讀取（見 §5、§8.1）。在決定前的鐵則是**這份 Sheet 不分享給任何人**；
+  若之後真的需要讓家人看帳，要先把 `credentials` 搬到另一份不分享的試算表，
+  或確定一律走 app 的家長模式
 - 是否要「消費紀錄」——提領後小孩回報實際買了什麼（教記帳，但會增加摩擦）
 
 ---
@@ -484,12 +504,25 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 
 | 階段 | 範圍 | 驗收 |
 |---|---|---|
-| **M1 骨架** | Sheet 建表、Apps Script `snapshot` + `admin_adjust`、前端 home 顯示餘額 | 家長手動入帳，小孩手機看得到 |
+| **M1 骨架** ✅ *（差後端部署）* | Sheet 建表、Apps Script `snapshot` + `admin_adjust`、前端 home 顯示餘額 | 家長手動入帳，小孩手機看得到 |
 | **M2 核心流** | 轉帳、開子帳戶（定存/目標）、交易明細 | 紅包 → 活期 → 定存 全鏈路走得通 |
 | **M3 自動化** | 每週零用錢 trigger、每月計息 trigger、到期提醒 | 跨月測試利息正確、定存到期轉 matured |
 | **M4 審核** | requests（三種 kind）+ admin 待審清單 | 小孩申請提領 → 家長核准 → 入帳；退回看得到理由 |
 | **M5 離線與韌性** | IndexedDB queue + clientId 冪等 + 快照新鮮度 | 飛航模式操作 → 復網自動補送且不重複入帳 |
 | **M6 家事與獎勵** | chores 清單、回報流程 | 小孩回報 → 家長核准 → 入帳 |
+
+**M1 現況（2026-09-18）**：程式碼已完成，只剩把 Apps Script 部署成 Web App、
+把 `/exec` 網址填進 `js/config.js` 的 `apiUrl`（步驟見 [docs/DEPLOY.md](docs/DEPLOY.md)）。
+
+- 後端已實作：`users` · `login` · `logout` · `whoami` · `snapshot` ·
+  `admin_adjust` · `admin_gift` · `admin_recalc` · `change_password`，
+  加上 script lock、`clientId` 冪等、首次登入自動開 `current` / `gift` 帳戶。
+- 前端已實作：登入頁（8 位數字鍵盤）、**餘額頁**（帳戶卡 + 總資產 + 離線快取）。
+- **尚未實作**：M3 的兩個 time-driven trigger（每週零用錢、每月計息），
+  以及 §7.2 的 `transfer` · `request` · `cancel_request` · `open_account` ·
+  `admin_decide` · `admin_config` · `admin_revoke_session`。
+- 前端的邏輯 401 處理（收到 `error:'unauthorized'` 就清 session 導回登入頁，§7.4）已接上，
+  快照快取也改成每人一個 key，避免共用平板上看到前一個人的餘額。
 
 M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持續打開的理由。
 審核與家事是家長端的管理需求，可以晚一點。
@@ -503,21 +536,23 @@ M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持�
 - [ ] 8 位數字鍵盤登入，輸滿自動送出；家長改用文字密碼欄
 - [ ] 登入後看到四張帳戶卡與總資產
 - [ ] 紅包從 `gift` 轉到 `current`，兩邊餘額同步正確
-- [ ] 開一筆 3 個月定存，試算畫面金額與實際到期金額一致
+- [ ] 開定存時自己填期數（不是從固定選項挑），試算畫面金額與實際到期金額一致
 - [ ] 提前解約 → 本金回到活期、利息歸零，明細看得到回沖那一筆
 - [ ] 儲蓄目標達標 → 解鎖 + 慶祝動畫
 - [ ] 轉錢進定存不需要家長核准，按下去立刻成立
 - [ ] 開定存確認頁顯示「解鎖日期」大字 + 到期金額，未勾選不能按確認
 - [ ] 提領／家事／解約送出後顯示「等爸爸媽媽確認中」，可自行撤回
 - [ ] 家長退回申請時必須填理由，小孩看得到
+- [ ] 每週零用錢依各小孩的 `users.weeklyAllowance` 發放，金額可以人人不同
 - [ ] 跨月結算：活期與定存各自依正確利率複利
 - [ ] 定存到期 → 停止計息 + 首頁提醒
 - [ ] 飛航模式送出轉帳 → 復網自動補送，**且只入帳一次**
 - [ ] Momo 登入後改 API 參數也看不到 Coco 的帳
 - [ ] 小孩帳號進不了 admin（即使手動改前端）；連錯 5 次密碼被鎖 15 分鐘
-- [ ] session 過期後自動導回登入頁，不會卡在空白畫面
+- [ ] session 過期後（`ok:false, error:'unauthorized'`）自動清除並導回登入頁，不會卡在空白畫面
 - [ ] 家長可在 admin 踢掉某台裝置，該裝置下次操作即失效
-- [ ] 兩台手機同時操作同一帳戶，餘額不會算錯
+- [ ] 兩台手機同時操作同一帳戶，餘額不會算錯；搶不到鎖時回 `busy` 而不是寫壞資料
+- [ ] Sheet 維持未分享狀態（`credentials` 只靠不分享保護，見 §5）
 - [ ] session 被踢掉後的第一個動作：畫面立刻回到選頭像，並顯示伺服器給的「登入過期了，請重新登入」
 - [ ] 上述情況下不會再繼續顯示舊快照，也不會跳出未處理的錯誤
 - [ ] Momo 被踢掉／登出後換 Coco 登入，同一台平板看不到 Momo 的餘額（快照快取分人存）
