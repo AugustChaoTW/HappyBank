@@ -15,8 +15,13 @@ const SCHEMA = {
              'lockUntil', 'targetAmount', 'balance', 'status', 'createdTs'],
   ledger: ['id', 'ts', 'kidId', 'accountId', 'type', 'amount', 'balanceAfter',
            'memo', 'by', 'refId', 'clientId'],
+  // photoFileId / decidedBy / decidedProxy 是 M6 補上的三欄（SPEC §5、§11）。
+  // 一律「接在最後面」，不照 SPEC 表格的排版插在中間——
+  // setup() 只重寫表頭那一列、不搬動資料，插在中間會讓既有列整排錯位
+  // （舊的 decidedNote 會突然被讀成 decidedBy）。
   requests: ['id', 'ts', 'kidId', 'kind', 'amount', 'choreId', 'fromAccountId',
-             'toAccountId', 'note', 'status', 'decidedTs', 'decidedNote', 'clientId'],
+             'toAccountId', 'note', 'status', 'decidedTs', 'decidedNote', 'clientId',
+             'photoFileId', 'decidedBy', 'decidedProxy'],
   chores: ['id', 'title', 'icon', 'reward', 'repeat', 'kidId', 'active'],
   config: ['key', 'value', 'note']
 };
@@ -48,7 +53,8 @@ const CONFIG_SEED = [
   ['session_hours_parent', 24,   '家長登入有效小時數'],
   ['login_max_fail',      5,     '連續登入失敗幾次鎖定'],
   ['login_lock_minutes',  15,    '鎖定時間（分鐘）'],
-  ['pbkdf_rounds',        1000,  '密碼雜湊迭代次數']
+  ['pbkdf_rounds',        1000,  '密碼雜湊迭代次數'],
+  ['chore_approver',      'vicky', '家事回報的指定核准者（role=parent 的 userId），其他家長要代理確認']
 ];
 
 function setup() {

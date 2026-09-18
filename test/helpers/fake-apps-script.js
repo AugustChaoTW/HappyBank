@@ -255,22 +255,203 @@ function makeUtilities(state) {
       if (Buffer.isBuffer(value)) return value.toString('base64');
       return Buffer.from(String(value), 'utf8').toString('base64');
     },
-    base64Decode(s) { return signedBytes(Buffer.from(String(s), 'base64')); },
-    newBlob(s) { return { getDataAsString: () => String(s) }; },
+    // Apps Script 的 base64Decode 對壞掉的字串會丟例外，不是默默回半包位元組。
+    // SPEC §7.2 第 4 條「base64 解不開 → photo-required」就是靠這個行為，
+    // 假環境若照 Node 的寬鬆行為走，那條驗證在測試裡永遠測不到。
+    base64Decode(s /*, charset */) {
+      const str = String(s).replace(/\s+/g, '');
+      if (str === '' || /[^A-Za-z0-9+/=]/.test(str) || str.length % 4 !== 0) {
+        throw new Error('Invalid argument: base64');
+      }
+      return signedBytes(Buffer.from(str, 'base64'));
+    },
+    // newBlob(data, contentType, name)：data 可以是字串或位元組陣列
+    newBlob(data, contentType, name) {
+      const bytes = Array.isArray(data)
+        ? data.slice()
+        : signedBytes(Buffer.from(String(data), 'utf8'));
+      return makeBlob(bytes, contentType || 'application/octet-stream', name || '');
+    },
     sleep() { /* no-op */ },
-    // 只支援本專案用得到的幾種 pattern，夠測試辨識即可
+    // 真的照 timeZone 算（原本吃的是 node process 的本地時區）。
+    // SPEC §7.2 的一天一次是以 Asia/Taipei 的日界線判定的，
+    // 假環境若忽略時區，跨午夜那幾條測試就會隨著跑測試的人在哪個時區而變色。
     formatDate(date, timeZone, format) {
       const d = new Date(date);
-      const pad = (n, w) => String(n).padStart(w || 2, '0');
-      return String(format)
-        .replace(/yyyy/g, d.getFullYear())
-        .replace(/MM/g, pad(d.getMonth() + 1))
-        .replace(/dd/g, pad(d.getDate()))
-        .replace(/HH/g, pad(d.getHours()))
-        .replace(/mm/g, pad(d.getMinutes()))
-        .replace(/ss/g, pad(d.getSeconds()));
+      if (isNaN(d.getTime())) throw new Error('formatDate: 不是合法的日期');
+      const parts = {};
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: timeZone || 'UTC', hour12: false,
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+      }).formatToParts(d).forEach(p => { parts[p.type] = p.value; });
+      // Intl 在午夜會給 '24'，Java 的 HH 是 '00'
+      if (parts.hour === '24') parts.hour = '00';
+      const strip = v => String(Number(v));
+      const map = {
+        yyyy: parts.year, MM: parts.month, dd: parts.day,
+        HH: parts.hour, mm: parts.minute, ss: parts.second,
+        M: strip(parts.month), d: strip(parts.day), H: strip(parts.hour)
+      };
+      return String(format).replace(/yyyy|MM|dd|HH|mm|ss|M|d|H/g, t => map[t]);
     }
   };
+}
+
+// ---------------------------------------------------------------- Drive
+
+function makeBlob(bytes, contentType, name) {
+  return {
+    getBytes() { return bytes.slice(); },
+    getName() { return name; },
+    setName(n) { name = n; return this; },
+    getContentType() { return contentType; },
+    setContentType(t) { contentType = t; return this; },
+    getDataAsString() { return unsignedBuffer(bytes).toString('utf8'); }
+  };
+}
+
+function iterator(list) {
+  let i = 0;
+  return {
+    hasNext() { return i < list.length; },
+    next() {
+      if (i >= list.length) throw new Error('沒有下一個了');
+      return list[i++];
+    }
+  };
+}
+
+class FakeDriveFile {
+  constructor(drive, parent, blob) {
+    this._drive = drive;
+    this._parent = parent;
+    this._blob = blob;
+    this._id = 'file-' + (++drive._seq);
+    this._trashed = false;
+    drive._filesById[this._id] = this;
+  }
+  getId() { return this._id; }
+  getName() { return this._blob.getName(); }
+  setName(n) { this._blob.setName(n); return this; }
+  getBlob() { return this._blob; }
+  getSize() { return this._blob.getBytes().length; }
+  getMimeType() { return this._blob.getContentType(); }
+  getUrl() { return 'https://drive.google.com/file/d/' + this._id + '/view'; }
+  getParents() { return iterator([this._parent]); }
+  isTrashed() { return this._trashed; }
+  setTrashed(v) {
+    this._trashed = v !== false;
+    return this;
+  }
+  // SPEC §5：這個專案刻意不呼叫 setSharing。測試就是靠這個計數器守住那句話。
+  setSharing(access, permission) {
+    this._drive.sharingCalls.push({ fileId: this._id, access, permission });
+    return this;
+  }
+}
+
+class FakeDriveFolder {
+  constructor(drive, name, parent) {
+    this._drive = drive;
+    this._name = name;
+    this._parent = parent || null;
+    this._id = 'folder-' + (++drive._seq);
+    this._folders = [];
+    this._files = [];
+    drive._foldersById[this._id] = this;
+  }
+  getId() { return this._id; }
+  getName() { return this._name; }
+  getParents() { return iterator(this._parent ? [this._parent] : []); }
+  getFolders() { return iterator(this._folders.slice()); }
+  getFiles() { return iterator(this._files.filter(f => !f.isTrashed())); }
+  getFoldersByName(name) {
+    return iterator(this._folders.filter(f => f.getName() === name));
+  }
+  getFilesByName(name) {
+    return iterator(this._files.filter(f => !f.isTrashed() && f.getName() === name));
+  }
+  createFolder(name) {
+    const f = new FakeDriveFolder(this._drive, String(name), this);
+    this._folders.push(f);
+    return f;
+  }
+  // createFile(blob) 或 createFile(name, content, mimeType)
+  createFile(a, b, c) {
+    const blob = (a && typeof a.getBytes === 'function')
+      ? a
+      : makeBlob(signedBytes(Buffer.from(String(b === undefined ? '' : b), 'utf8')),
+                 c || 'text/plain', String(a));
+    const file = new FakeDriveFile(this._drive, this, blob);
+    this._files.push(file);
+    this._drive.created.push({ folder: this.pathString(), name: file.getName(), id: file.getId() });
+    return file;
+  }
+  pathString() {
+    const names = [];
+    let p = this;
+    while (p && p._parent) { names.unshift(p.getName()); p = p._parent; }
+    return names.join('/');
+  }
+}
+
+function makeDrive() {
+  const drive = {
+    _seq: 0,
+    _filesById: {},
+    _foldersById: {},
+    created: [],        // 建過的檔案（測「只建一張照片」用）
+    sharingCalls: []    // 必須一直是空的，見 FakeDriveFile.setSharing
+  };
+  const root = new FakeDriveFolder(drive, 'My Drive', null);
+  drive.root = root;
+
+  drive.app = {
+    Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK', PRIVATE: 'PRIVATE', ANYONE: 'ANYONE' },
+    Permission: { VIEW: 'VIEW', EDIT: 'EDIT', NONE: 'NONE' },
+    getRootFolder() { return root; },
+    getFoldersByName(name) { return root.getFoldersByName(name); },
+    getFilesByName(name) { return root.getFilesByName(name); },
+    createFolder(name) { return root.createFolder(name); },
+    createFile(a, b, c) { return root.createFile(a, b, c); },
+    getFolderById(id) {
+      const f = drive._foldersById[String(id)];
+      if (!f) throw new Error('No item with the given ID could be found: ' + id);
+      return f;
+    },
+    getFileById(id) {
+      const f = drive._filesById[String(id)];
+      // Drive 的 getFileById 對「不存在／沒權限」是丟例外；
+      // 進垃圾桶的檔案仍然拿得到，要靠 isTrashed() 判斷（SPEC §7.6 第 4 條）。
+      if (!f) throw new Error('No item with the given ID could be found: ' + id);
+      return f;
+    }
+  };
+
+  // 測試便利：把一個檔案徹底刪掉（模擬有人在 Drive 清空垃圾桶）
+  drive.destroy = function (id) {
+    const f = drive._filesById[String(id)];
+    if (!f) return false;
+    const list = f._parent._files;
+    const i = list.indexOf(f);
+    if (i >= 0) list.splice(i, 1);
+    delete drive._filesById[String(id)];
+    return true;
+  };
+  drive.fileById = id => drive._filesById[String(id)] || null;
+  // 依路徑（'HappyBank 家事照片/momo'）找資料夾，找不到回 null
+  drive.folderAt = function (path) {
+    let cur = root;
+    for (const name of String(path).split('/').filter(Boolean)) {
+      const it = cur.getFoldersByName(name);
+      if (!it.hasNext()) return null;
+      cur = it.next();
+    }
+    return cur;
+  };
+
+  return drive;
 }
 
 // ---------------------------------------------------------------- 環境組裝
@@ -287,6 +468,7 @@ function createFakeEnv(options) {
   };
 
   const book = new FakeSpreadsheet(sheetId || 'fake-sheet-id');
+  const drive = makeDrive();
 
   // 鎖：可設定成「拿不到」以模擬 15 秒逾時
   const lock = {
@@ -359,6 +541,7 @@ function createFakeEnv(options) {
   const globals = {
     SpreadsheetApp,
     ContentService,
+    DriveApp: drive.app,
     LockService: { getScriptLock: () => scriptLock, getUserLock: () => scriptLock, getDocumentLock: () => scriptLock },
     Utilities: makeUtilities(state),
     Logger,
@@ -389,11 +572,13 @@ function createFakeEnv(options) {
     }
   };
 
-  return { globals, book, lock, state, logs: state.logs, outputs: state.outputs };
+  return { globals, book, drive, lock, state, logs: state.logs, outputs: state.outputs };
 }
 
 module.exports = {
   createFakeEnv,
+  makeDrive,
+  makeBlob,
   FakeSpreadsheet,
   FakeSheet,
   FakeRange,

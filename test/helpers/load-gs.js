@@ -67,6 +67,7 @@ function loadGs(options) {
   api.$ = {
     env,
     book: env.book,
+    drive: env.drive,
     lock: env.lock,
     logs: env.logs,
     context,

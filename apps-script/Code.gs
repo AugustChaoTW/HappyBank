@@ -40,7 +40,11 @@ function route(p) {
       case 'logout':   return respond(apiLogout(p));
       case 'snapshot': return respond(apiSnapshot(p));
       case 'change_password': return respond(apiChangePassword(p));
+      case 'request':        return respond(apiRequest(p));
+      case 'cancel_request': return respond(apiCancelRequest(p));
+      case 'chore_photo':    return respond(apiChorePhoto(p));
       // 家長專用
+      case 'admin_decide': return respond(apiAdminDecide(p));
       case 'admin_adjust': return respond(apiAdminAdjust(p));
       case 'admin_gift':   return respond(apiAdminGift(p));
       case 'admin_recalc': return respond(apiAdminRecalc(p));
@@ -417,8 +421,11 @@ function apiSnapshot(p) {
       user: publicUser(user),
       accounts: accountsOf(user.userId),
       ledger: ledgerOf(user.userId, 50),
+      // pending 之外，還要帶「本期間已決定」的 chore_done——
+      // 沒有這些，chores 頁畫不出「今天已回報 / 媽媽在 9:14 確認」（SPEC §7.1、§6）
       requests: readTable('requests')
-        .filter(r => String(r.kidId) === user.userId && r.status === 'pending')
+        .filter(r => String(r.kidId) === user.userId)
+        .filter(r => r.status === 'pending' || decidedChoreThisPeriod(r))
         .map(stripRow),
       chores: readTable('chores')
         .filter(c => isTrue(c.active))
@@ -440,9 +447,23 @@ function apiSnapshot(p) {
   return {
     ok: true, serverTs: new Date().toISOString(), rates,
     user: publicUser(user), kids,
+    // 家事的指定核准者放頂層，admin 才知道自己按下去是正式確認還是代理（SPEC §7.1、§9.5）
+    chore_approver: String(getConfigValue('chore_approver') || ''),
+    // requests 帶 photoFileId，但絕不夾帶照片內容——十筆待審全塞 base64
+    // 會讓登入變成十秒，縮圖一律走 chore_photo 延遲抓（SPEC §7.6）
     requests: readTable('requests').filter(r => r.status === 'pending').map(stripRow),
     ledger: readTable('ledger').slice(-50).reverse().map(stripRow)
   };
+}
+
+// 這一筆是不是「本期間已決定」的家事回報（給小孩端 chores 卡片畫狀態用）
+function decidedChoreThisPeriod(r) {
+  if (String(r.kind) !== 'chore_done') return false;
+  if (r.status !== 'approved' && r.status !== 'rejected') return false;
+  const chore = readTable('chores').filter(c => String(c.id) === String(r.choreId))[0];
+  const repeat = chore ? chore.repeat : 'daily';
+  const key = chorePeriodKey(repeat, r.ts);
+  return !!key && key === chorePeriodKey(repeat, new Date());
 }
 
 function accountsOf(kidId) {
@@ -549,6 +570,339 @@ function apiAdminRecalc(p) {
 
     return { ok: true, checked: accounts.length, fixed, fixedLedgerRows: fixedRows.length };
   });
+}
+
+// ---------------------------------------------------------------- 家事回報（M6）
+// SPEC §7.2（六道驗證）、§7.5（照片寫在鎖外、Sheet 寫在鎖內）、§7.6（代理取圖）、§9.5（代理確認）。
+
+const PHOTO_ROOT = 'HappyBank 家事照片';
+const PHOTO_MAX_BYTES = 1536 * 1024;   // 1.5 MB（SPEC §7.2 第 4 條）
+const PHOTO_MIN_BYTES = 2 * 1024;      // 小於 2 KB 視為黑畫面／壞檔
+
+// 期間字串。一律以 Asia/Taipei 算，不用 UTC、不用瀏覽器時區（SPEC §7.2 第 5 條）。
+// 回 null 表示這個 ts 根本不是日期（格子被手改壞了），呼叫端當成「比不出來」。
+function taipeiDay(ts) {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+  return Utilities.formatDate(d, 'Asia/Taipei', 'yyyy-MM-dd');
+}
+
+// 往前退到最近一個週日 00:00（台北），回傳那天的日期字串。
+// 不用 yyyy-'W'ww——那個的週起始日隨 locale 變（SPEC §7.2 第 5 條）。
+function taipeiWeekStartDay(ts) {
+  const day = taipeiDay(ts);
+  if (!day) return null;
+  // 用 UTC 當「無時區的日曆」來算星期幾，才不會被執行環境的時區牽著走
+  const cal = new Date(day + 'T00:00:00Z');
+  cal.setUTCDate(cal.getUTCDate() - cal.getUTCDay());
+  return cal.toISOString().slice(0, 10);
+}
+
+function chorePeriodKey(repeat, ts) {
+  if (String(repeat) === 'once') return 'once';
+  if (String(repeat) === 'weekly') {
+    const w = taipeiWeekStartDay(ts);
+    return w && ('week:' + w);
+  }
+  const d = taipeiDay(ts);
+  return d && ('day:' + d);
+}
+
+function findRequest(requestId) {
+  const want = String(requestId || '');
+  if (!want) return null;
+  return readTable('requests').filter(r => String(r.id) === want)[0] || null;
+}
+
+function findRequestByClientId(clientId) {
+  const want = String(clientId || '');
+  if (!want) return null;
+  return readTable('requests').filter(r => String(r.clientId) === want)[0] || null;
+}
+
+// 這件家事在「現在」這個期間內是否已經有一筆算數的回報。
+// rejected / cancelled 不算數——被退回或自己撤回之後可以重報（SPEC §9.5 二）。
+function activeChoreReport(kidId, choreId, repeat) {
+  const now = chorePeriodKey(repeat, new Date());
+  return readTable('requests').filter(r =>
+    String(r.kind) === 'chore_done' &&
+    String(r.kidId) === String(kidId) &&
+    String(r.choreId) === String(choreId) &&
+    (r.status === 'pending' || r.status === 'approved') &&
+    chorePeriodKey(repeat, r.ts) === now
+  )[0] || null;
+}
+
+// ---- request(chore_done) ----------------------------------------------
+
+function apiRequest(p) {
+  // 1. 身分先驗，再看要建哪一種申請——沒登入的人連「有哪些 kind」都不該試得出來
+  const user = requireSession(p);
+  const kind = String(p.kind || '');
+  if (kind === 'chore_done') return apiRequestChoreDone(p, user);
+  // withdraw / term_break 是 M4 的範圍，還沒實作
+  return { ok: false, error: 'unknown-action', message: '還不支援的申請種類：' + kind };
+}
+
+function apiRequestChoreDone(p, user) {
+  // kidId 一律取自 session，不接受請求帶（SPEC §7.2 第 1 條）
+  if (user.role !== 'kid') throw new Error('AUTH:只有小孩可以回報家事。');
+  const kidId = String(user.userId);
+
+  const clientId = String(p.clientId || '');
+  if (!clientId) {
+    return { ok: false, error: 'bad-request', message: '缺少 clientId，請重新整理再試一次。' };
+  }
+
+  // 2. 冪等：同一個 clientId 直接回原本那筆，不重複建檔也不重複寫 Sheet（SPEC §7.3）
+  const dup = findRequestByClientId(clientId);
+  if (dup) {
+    return { ok: true, duplicate: true, requestId: dup.id, photoFileId: dup.photoFileId || '' };
+  }
+
+  // 3. 家事存在、還開著、而且不是別人專屬的（SPEC §7.2 第 3 條）
+  const chore = readTable('chores').filter(c => String(c.id) === String(p.choreId || ''))[0];
+  if (!chore || !isTrue(chore.active)) {
+    return { ok: false, error: 'no-such-chore', message: '找不到這件家事。' };
+  }
+  if (chore.kidId && String(chore.kidId).toLowerCase() !== kidId.toLowerCase()) {
+    return { ok: false, error: 'no-such-chore', message: '這件家事不是你的。' };
+  }
+
+  // 4. 照片必填（SPEC §7.2 第 4 條）
+  const NO_PHOTO = { ok: false, error: 'photo-required', message: '要拍一張照片才能送出喔。' };
+  const mime = String(p.photoMime || 'image/jpeg');
+  if (mime !== 'image/jpeg') return NO_PHOTO;
+  const raw = String(p.photo === undefined || p.photo === null ? '' : p.photo);
+  if (!raw) return NO_PHOTO;
+  let bytes;
+  try {
+    bytes = Utilities.base64Decode(raw);
+  } catch (err) {
+    return NO_PHOTO;   // base64 解不開也算沒照片
+  }
+  if (!bytes || !bytes.length) return NO_PHOTO;
+  if (bytes.length > PHOTO_MAX_BYTES) {
+    return { ok: false, error: 'photo-too-big', message: '照片太大了，請重新壓縮再送一次。' };
+  }
+  // 太小的一律當壞檔（黑畫面／壓縮失敗），跟沒照片一樣請小孩重拍
+  if (bytes.length < PHOTO_MIN_BYTES) return NO_PHOTO;
+
+  // 5. 一天一次（weekly 則一週一次）。先在鎖外擋掉，省得白傳一張照片。
+  if (activeChoreReport(kidId, chore.id, chore.repeat)) {
+    return { ok: false, error: 'already-reported', message: alreadyReportedMessage(chore) };
+  }
+
+  // 6. 寫入：照片先寫 Drive（鎖外，Drive 是慢動作），Sheet 再寫（鎖內）。SPEC §7.5
+  const photoFileId = savePhoto(kidId, chore.id, clientId, bytes);
+
+  return withLock(() => {
+    // 鎖內重跑一次冪等與一天一次——兩台手機同時送的時候，先後在這裡分出來
+    const again = findRequestByClientId(clientId);
+    if (again) {
+      return { ok: true, duplicate: true, requestId: again.id, photoFileId: again.photoFileId || '' };
+    }
+    if (activeChoreReport(kidId, chore.id, chore.repeat)) {
+      return { ok: false, error: 'already-reported', message: alreadyReportedMessage(chore) };
+    }
+    const id = Utilities.getUuid();
+    appendObj('requests', {
+      id: id, ts: new Date(), kidId: kidId, kind: 'chore_done',
+      amount: '',                       // 金額不採信前端，核准時才查 chores.reward（SPEC §9.5）
+      choreId: chore.id, fromAccountId: '', toAccountId: '',
+      note: String(p.note || ''), status: 'pending',
+      decidedTs: '', decidedNote: '', decidedBy: '', decidedProxy: '',
+      photoFileId: photoFileId, clientId: clientId
+    });
+    return { ok: true, requestId: id, photoFileId: photoFileId };
+  });
+}
+
+function alreadyReportedMessage(chore) {
+  return String(chore.repeat) === 'weekly'
+    ? '這件家事這週已經報過了。'
+    : '這件家事今天已經報過了。';
+}
+
+// 照片進 HappyBank 家事照片/<kidId>/，檔名帶 clientId 前 8 碼，
+// 離線佇列重送時認得出同一張、不會在 Drive 裡留一堆重複檔（SPEC §5、§7.5）。
+// **不呼叫 setSharing**：檔案留在擁有者的 private 資料夾，要看圖走 chore_photo。
+function savePhoto(kidId, choreId, clientId, bytes) {
+  const folder = getOrCreatePath([PHOTO_ROOT, kidId]);
+  const name = Utilities.formatDate(new Date(), 'Asia/Taipei', 'yyyyMMdd') +
+    '-' + choreId + '-' + String(clientId).slice(0, 8) + '.jpg';
+  const existing = folder.getFilesByName(name);
+  if (existing.hasNext()) return existing.next().getId();
+  return folder.createFile(Utilities.newBlob(bytes, 'image/jpeg', name)).getId();
+}
+
+function getOrCreatePath(names) {
+  let parent = DriveApp.getRootFolder();
+  names.forEach(name => {
+    const found = parent.getFoldersByName(name);
+    parent = found.hasNext() ? found.next() : parent.createFolder(name);
+  });
+  return parent;
+}
+
+// ---- cancel_request ---------------------------------------------------
+
+function apiCancelRequest(p) {
+  const user = requireSession(p);
+  const req = findRequest(p.requestId);
+  if (!req) return { ok: false, error: 'no-such-request', message: '找不到這筆申請。' };
+  if (String(req.kidId).toLowerCase() !== String(user.userId).toLowerCase()) {
+    throw new Error('AUTH:這不是你的申請。');
+  }
+  return withLock(() => {
+    const fresh = findRequest(req.id);
+    if (!fresh || fresh.status !== 'pending') {
+      return { ok: false, error: 'already-decided', message: '這筆已經處理過了。' };
+    }
+    patchRow('requests', fresh._row, {
+      status: 'cancelled', decidedTs: new Date(), decidedBy: user.userId, decidedProxy: false
+    });
+    return { ok: true, requestId: fresh.id, status: 'cancelled' };
+  });
+}
+
+// ---- admin_decide -----------------------------------------------------
+
+// config.chore_approver 必須是一個存在且 active 的 parent，
+// 不是就當設定錯誤，不要靜默 fallback 成「誰都能核准」（SPEC §5）。
+function choreApprover() {
+  const id = String(getConfigValue('chore_approver') || '').trim().toLowerCase();
+  if (!id) return null;
+  const u = findBy('users', 'userId', id);
+  if (!u || u.role !== 'parent' || !isTrue(u.active)) return null;
+  return u;
+}
+
+function apiAdminDecide(p) {
+  const parent = requireParent(p);          // 小孩一律 unauthorized（SPEC §7.4）
+  const decision = String(p.decision || '');
+  if (decision !== 'approve' && decision !== 'reject') {
+    return { ok: false, error: 'bad-request', message: '只能核准或退回。' };
+  }
+  const req = findRequest(p.requestId);
+  if (!req) return { ok: false, error: 'no-such-request', message: '找不到這筆申請。' };
+  if (req.status !== 'pending') {
+    return { ok: false, error: 'already-decided', message: '這筆已經被處理過了，請重新整理。' };
+  }
+
+  const note = String(p.decidedNote || p.note || '');
+  // 退回必填理由，讓小孩知道為什麼（SPEC §9.4）
+  if (decision === 'reject' && !note.trim()) {
+    return { ok: false, error: 'note-required', message: '退回要寫一句理由，讓小孩知道為什麼。' };
+  }
+
+  // 家事多一層：指定核准者，其他家長要明確代理（SPEC §7.2、§9.5 三）
+  let proxy = false;
+  let approver = null;
+  if (req.kind === 'chore_done') {
+    approver = choreApprover();
+    if (!approver) {
+      return { ok: false, error: 'server', message: 'config.chore_approver 設定錯誤，請家長檢查。' };
+    }
+    if (String(parent.userId).toLowerCase() !== String(approver.userId).toLowerCase()) {
+      if (!isTrue(p.proxy)) {
+        return {
+          ok: false, error: 'needs-proxy',
+          message: '這件要 ' + approver.displayName + ' 確認，你可以按「代替確認」。'
+        };
+      }
+      proxy = true;   // 寫入當下就記死，不要事後用 decidedBy 推導（SPEC §5）
+    }
+  }
+
+  return withLock(() => {
+    const fresh = findRequest(req.id);
+    if (!fresh || fresh.status !== 'pending') {
+      return { ok: false, error: 'already-decided', message: '這筆已經被處理過了，請重新整理。' };
+    }
+
+    if (decision === 'reject') {
+      patchRow('requests', fresh._row, {
+        status: 'rejected', decidedTs: new Date(), decidedBy: parent.userId,
+        decidedProxy: proxy, decidedNote: note
+      });
+      return { ok: true, requestId: fresh.id, status: 'rejected' };
+    }
+
+    if (fresh.kind !== 'chore_done') {
+      return { ok: false, error: 'unknown-action', message: '這種申請的核准還沒實作。' };
+    }
+
+    // 先入帳再改狀態（同一把鎖內）：反過來的話，ledger 失敗會留下
+    // 「已核准但沒拿到錢」的 request，而那是小孩會吵架的方向。
+    const posted = creditChore(fresh, parent, approver, proxy);
+    if (!posted.ok) return posted;
+
+    patchRow('requests', fresh._row, {
+      status: 'approved', decidedTs: new Date(), decidedBy: parent.userId,
+      decidedProxy: proxy, decidedNote: note
+    });
+    return {
+      ok: true, requestId: fresh.id, status: 'approved',
+      amount: posted.amount, balanceAfter: posted.balanceAfter
+    };
+  });
+}
+
+// 家事獎金：金額一律伺服器查 chores.reward，一律進活期主帳戶（SPEC §9.5 四）
+function creditChore(req, parent, approver, proxy) {
+  const chore = readTable('chores').filter(c => String(c.id) === String(req.choreId))[0];
+  if (!chore) return { ok: false, error: 'no-such-chore', message: '找不到這件家事，無法入帳。' };
+  const amount = Math.round(num(chore.reward, 0));
+  if (!amount) return { ok: false, error: 'zero-amount', message: '這件家事的獎金是 0，請先去設定。' };
+
+  ensureDefaultAccounts(req.kidId);
+  const acc = readTable('accounts').filter(a =>
+    String(a.kidId) === String(req.kidId) && a.type === 'current' && a.status === 'active')[0];
+  if (!acc) return { ok: false, error: 'no-account', message: '找不到活期主帳戶。' };
+
+  const when = Utilities.formatDate(new Date(req.ts), 'Asia/Taipei', 'M/d');
+  let memo = chore.title + '（' + when + '）';
+  if (proxy && approver) {
+    memo += ' · ' + parent.displayName + ' 代替 ' + approver.displayName + ' 確認';
+  }
+
+  const res = postLedger({
+    accountId: acc.accountId, type: 'chore', amount: amount, memo: memo,
+    by: parent.userId, refId: req.id,
+    // 一筆 request 只入得了一次帳，就算兩個家長搶著按也一樣（SPEC §7.3）
+    clientId: 'req:' + req.id
+  });
+  if (res.ok) res.amount = amount;
+  return res;
+}
+
+// ---- chore_photo（§7.6）------------------------------------------------
+
+function apiChorePhoto(p) {
+  // 1. 身分
+  const user = requireSession(p);
+  // 2. request 存在
+  const req = findRequest(p.requestId);
+  if (!req) return { ok: false, error: 'no-such-request', message: '找不到這筆申請。' };
+  // 3. 小孩只能抓自己那筆，kidId 取自 session；家長不受限
+  if (user.role === 'kid' &&
+      String(req.kidId).toLowerCase() !== String(user.userId).toLowerCase()) {
+    return { ok: false, error: 'not-your-photo', message: '這不是你的照片。' };
+  }
+  // 4. 檔案還在不在
+  const MISSING = { ok: false, error: 'photo-missing', message: '照片讀不到。' };
+  const fileId = String(req.photoFileId || '');
+  if (!fileId) return MISSING;
+  let data;
+  try {
+    const file = DriveApp.getFileById(fileId);
+    if (!file || file.isTrashed()) return MISSING;
+    data = Utilities.base64Encode(file.getBlob().getBytes());
+  } catch (err) {
+    return MISSING;   // 檔案被刪掉是可能發生的事，不要回 server
+  }
+  return { ok: true, requestId: req.id, mime: 'image/jpeg', data: data };
 }
 
 // ---------------------------------------------------------------- 密碼雜湊
