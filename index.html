@@ -7,6 +7,8 @@
   <meta name="theme-color" content="#2e9e5b">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏦</text></svg>">
   <link rel="stylesheet" href="css/style.css">
+  <!-- 注音顯示模式；字型 CSS 由 js/zhuyin.js 在小孩按下開關時才動態載入 -->
+  <link rel="stylesheet" href="css/zhuyin.css">
 </head>
 <body>
 
@@ -67,6 +69,10 @@
 
   <!-- 餘額頁（SPEC M1）-->
   <section id="view-home" class="view hidden">
+    <!-- 小孩頁首列：ㄅㄆㄇ 開關（家長登入時 js/zhuyin.js 會把它藏起來）-->
+    <div class="kid-toolbar">
+      <button type="button" class="btn-zhuyin" aria-pressed="false" aria-label="打開注音" title="打開注音" hidden>ㄅㄆㄇ</button>
+    </div>
     <div id="home-banner" class="banner hidden"></div>
     <div id="home-body"></div>
     <p id="home-fresh" class="freshness"></p>
@@ -78,6 +84,7 @@
     <div class="page-head">
       <button class="btn-back" id="btn-chores-back">← 回首頁</button>
       <h2>🧹 家事賺錢</h2>
+      <button type="button" class="btn-zhuyin" aria-pressed="false" aria-label="打開注音" title="打開注音" hidden>ㄅㄆㄇ</button>
     </div>
     <p class="msg error hidden" id="chores-msg"></p>
     <p class="chores-summary" id="chores-summary"></p>
@@ -92,6 +99,7 @@
     <div class="page-head">
       <button class="btn-back" id="btn-allowance-back">← 回首頁</button>
       <h2>🎁 每日零用錢</h2>
+      <button type="button" class="btn-zhuyin" aria-pressed="false" aria-label="打開注音" title="打開注音" hidden>ㄅㄆㄇ</button>
     </div>
     <p class="msg error hidden" id="allowance-msg"></p>
     <p class="chores-summary" id="allowance-summary"></p>
@@ -132,5 +140,6 @@
   <script src="js/home.js"></script>
   <script src="js/login.js"></script>
   <script src="js/version.js"></script>
+  <script src="js/zhuyin.js"></script>
 </body>
 </html>
