@@ -429,6 +429,8 @@ function apiSnapshot(p) {
         .map(stripRow),
       // 今天的三項自我檢查。UI 靠這個畫勾選框，家長改 config 就跟著變。
       daily_checklist: dailyChecklistItems(),
+      // 小孩要知道自己在等誰，畫面才寫得出「等媽媽確認」而不是寫死一個名字
+      chore_approver: String(getConfigValue('chore_approver') || ''),
       chores: readTable('chores')
         .filter(c => isTrue(c.active))
         .filter(c => !c.kidId || String(c.kidId) === user.userId)
@@ -973,7 +975,10 @@ function apiAdminDecide(p) {
 
     patchRow('requests', fresh._row, {
       status: 'approved', decidedTs: new Date(), decidedBy: parent.userId,
-      decidedProxy: proxy, decidedNote: note
+      decidedProxy: proxy, decidedNote: note,
+      // 回寫實付金額：不然小孩端只能去 ledger 找「同一天最後一筆 allowance」，
+      // 那會跟其他入帳撞在一起，畫面上顯示錯的數字。
+      amount: posted.amount
     });
     return {
       ok: true, requestId: fresh.id, status: 'approved',

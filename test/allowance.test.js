@@ -733,3 +733,31 @@ test('不認得的 kind 還是被擋掉', () => {
   assert.strictEqual(res.ok, false);
   assert.strictEqual(res.error, 'unknown-action');
 });
+
+// ------------------------------------------------- 小孩端要拿得到金額與核准者
+
+test('核准後把實付金額回寫到 request，小孩端不必從 ledger 猜', () => {
+  const gs = freshBank();
+  const kid = login(gs, 'momo');
+  const vicky = login(gs, 'vicky');
+  setDailyAllowance(gs, 'momo', 35);
+
+  const res = claim(gs, kid);
+  assert.strictEqual(approve(gs, vicky, res.requestId).ok, true);
+
+  // 沒有回寫的話，前端只能找「同一天最後一筆 type=allowance 的 ledger」，
+  // 那會跟其他 allowance 入帳撞在一起，顯示錯的數字。
+  const row = requestRows(gs).find(r => r.id === res.requestId);
+  assert.strictEqual(Number(row.amount), 35, 'request 要記下實際入帳的金額');
+});
+
+test('小孩快照要帶 chore_approver，才知道要等誰確認', () => {
+  const gs = freshBank();
+  const kid = login(gs, 'momo');
+  const snap = gs.$.call({ action: 'snapshot', session: kid });
+  assert.strictEqual(snap.chore_approver, 'vicky');
+
+  setConfig(gs, 'chore_approver', 'aug');
+  const snap2 = gs.$.call({ action: 'snapshot', session: login(gs, 'momo') });
+  assert.strictEqual(snap2.chore_approver, 'aug', '改設定後小孩端要跟著變');
+});
