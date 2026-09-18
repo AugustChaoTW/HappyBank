@@ -224,7 +224,10 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 | note | string | 小孩自己打的理由 |
 | status | enum | `pending` / `approved` / `rejected` / `cancelled` |
 | decidedTs | datetime\|null | |
+| decidedBy | string\|null | **實際按下核准／退回的人的 userId**。原本只記時間不記人，代理確認就查不出是誰決定的（見 §9.5） |
+| decidedProxy | bool | 是否為代理確認（核准者不是 `config.chore_approver`）。**寫入當下就記死，不要事後用 `decidedBy !== config.chore_approver` 推導**——`chore_approver` 一旦改過，歷史紀錄就會說謊 |
 | decidedNote | string | 家長回覆（退回時必填，讓小孩知道為什麼） |
+| photoUrl | string\|null | 家事照片在 Google Drive 的連結（見下方「家事照片」）。`kind = chore_done` **必填**；照片二進位內容不進 Sheet |
 | clientId | string | 冪等鍵 |
 
 ### `chores`
@@ -243,11 +246,44 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 `term_months_min`（3）· `term_months_max`（12）·
 `allowance_weekday`（0-6，固定 0＝週日）· `allowance_hour`（8，24 小時制）·
 `session_days_kid` · `session_hours_parent` · `login_max_fail` · `login_lock_minutes` · `pbkdf_rounds` ·
-`approval_mode`（固定 `tiered`，見 §9）· `kid_password_digits`（8）
+`approval_mode`（固定 `tiered`，見 §9）· `kid_password_digits`（8）·
+`chore_approver`（預設 `vicky`）
 
 > 這裡**沒有**每週零用錢金額（在 `users.weeklyAllowance`，逐人設定），
 > 也**沒有**定存期數的固定選項——期數是開戶時自由填的，只受 `term_months_min` /
 > `term_months_max` 上下限約束，由伺服器端 `open_account` 把關（見 §4.3、§9.3）。
+
+`chore_approver` 是**家事回報的指定核准者**，值是一個 `role = parent` 的 userId，預設 `vicky`。
+另一位家長仍然可以核准，但必須走「代理確認」（見 §9.5）。把它放進 `config` 是為了
+「媽媽長期出差／換人管家事」時改一格就好，不用改程式碼。
+伺服器端讀到的值若不是一個存在且 `active` 的 parent，視為設定錯誤，
+`admin_decide` 對 `chore_done` 一律回 `ok:false, error:'server'`（不要靜默 fallback 成「誰都能核准」）。
+
+### 家事照片（Google Drive，不進 Sheet）
+
+照片是資料模型的一部分，只是不存在 Sheet 裡。作法沿用 penghu-explorer 的
+「手機照片 → base64 → Apps Script → Drive」那條路（同樣的手法，不是同一份程式碼——兩個 repo 刻意不共用）。
+
+- **位置**：Apps Script 以 `DriveApp` 在擁有者雲端硬碟根目錄下建
+  `HappyBank 家事照片/<kidId>/`，資料夾不存在就建（`getOrCreatePath`，可重複執行）。
+- **檔名**：`<yyyyMMdd>-<choreId>-<clientId 前 8 碼>.jpg`
+  （日期取 `Asia/Taipei`）。帶 `clientId` 是為了離線佇列重送時**認得出同一張照片**，
+  不會在 Drive 裡留下一堆重複檔（見 §7.5）。
+- **格式**：一律 JPEG。前端上傳前必須先壓縮（最長邊 ~1280px、品質 0.8，見 §7.5），
+  伺服器不做影像處理。
+- **分享**：`file.setSharing(ANYONE_WITH_LINK, VIEW)`，URL 寫回 `requests.photoUrl`。
+  小孩與家長的瀏覽器沒有登入 Drive，不開連結權限就看不到自己的照片。
+- **一張照片對一筆 request**：`photoUrl` 是一對一，不做相簿、不支援補傳第二張。
+
+> ⚠️ **風險：`ANYONE_WITH_LINK` 是「知道網址就看得到」，不是「只有我們家看得到」。**
+> 這些是家裡室內的照片（廚房、小孩房間、垃圾桶旁邊），唯一的保護是網址猜不到。
+> 網址會出現在 Sheet、在小孩手機的 localStorage 快照、在家長的瀏覽紀錄裡，
+> 任何一處外流就等於照片外流，而且 Drive 檔案預設**永久存在**。
+> v1 接受這個取捨（照片量小、內容平凡、家用情境），但這是本功能最實質的隱私風險，
+> 要讓家長知道。真正的解法是改走「Apps Script 代理」：檔案保持 private，
+> `photoUrl` 改存 `fileId`，前端帶 session 打 `GET ?action=chore_photo&requestId=…`
+> 由伺服器驗身分後回傳圖片 base64。成本是每張照片多一趟 Apps Script 往返。
+> **何時切換、照片要不要定期刪除，列在 §10。**
 
 ---
 
@@ -265,10 +301,10 @@ js/
   store.js              localStorage 快照 + 資料新鮮度（「更新於 ○○」）
   money.js              金額格式化、利息試算、「還要幾週」估算
   account.js            餘額頁、帳戶卡片、轉帳
-  chores.js             家事清單、回報
+  chores.js             家事清單、回報、拍照與壓縮（canvas → JPEG base64，見 §7.5）
   goals.js              開子帳戶（定存 / 目標）、進度條
   history.js            交易明細
-  admin.js              家長模式：待審清單、手動調帳、設定
+  admin.js              家長模式：待審清單（含家事照片縮圖）、代理確認、手動調帳、設定
   app.js                路由與主流程
   version.js            照抄（footer 顯示 commit hash）
 apps-script/
@@ -287,12 +323,31 @@ data/
 - **home**：登入後直接進來 → 四張帳戶卡（活期 / 紅包 / 各定存 / 各目標），總資產大字，
   「這個月預計利息 ○○ 元」誘導存錢，待審/到期提醒 badge。
 - **account**：單一帳戶詳情 + 轉帳 + 提領申請。
-- **chores**：家事清單，點「我做完了 ✋」。
+- **chores**：**每日家事清單**。一件家事一張卡：icon、名稱、獎金、以及一個**狀態**——
+
+  | 狀態 | 顯示 | 可否操作 |
+  |---|---|---|
+  | 可回報 | 「我做完了 📷」大按鈕 | 點下去直接叫相機 |
+  | 今天已回報（等待中） | 「⏳ 等媽媽確認」+ 照片縮圖 + 送出時間 | 只能**撤回**，不能重送 |
+  | 今天已入帳 | 「✅ 媽媽在 9/18 晚上 9:14 確認 ＋10 元」+ 照片縮圖 | 不能再報（見 §7.2 一天一次） |
+  | 被退回 | 「❌ 退回：⟨家長理由⟩」 | 可以重拍重報（退回不佔用當天扣打） |
+
+  卡片按 `repeat` 分兩區：**今天的家事（daily）**、**這週的家事（weekly）**，
+  weekly 的狀態文字寫「這週已回報」而不是「今天已回報」。
+  清單頂端一行小字：「今天已回報 2 件，等確認中 ＋20 元」——讓小孩看得到還沒到手的錢。
+
+  **拍照流程**：按鈕直接開 `<input type="file" accept="image/*" capture="environment">`
+  （不自建相機 UI，交給系統 App）→ 選到檔案後**先在 canvas 壓縮**（§7.5）→
+  畫面出現預覽縮圖 + 「重拍」/「送出」。**沒有照片時「送出」是 disabled**，
+  而且伺服器端還會再擋一次（§7.2）。壓縮與上傳期間顯示進度，不要讓小孩以為當掉了連按。
 - **goals**：開新子帳戶精靈（選 定存 or 目標 → 填目的 → **自己決定要鎖幾個月**／填目標金額 → 試算「到期會變成 ○○ 元」）。
   **試算畫面是關鍵轉換點**，要把 10% 的威力視覺化。
 - **history**：全帳戶交易明細，可依帳戶篩選。
 - **admin**：僅 `role = parent` 的 session 可進入（伺服器判定，前端只是隱藏入口）。
   待審清單一鍵核准/退回、手動調帳、**逐個小孩改每週零用錢**（`users.weeklyAllowance`）、編家事、看 `sessions` 踢掉裝置。
+  **家事待審項目多一張照片縮圖**（`<img src="{photoUrl}">`，點下去開大圖），
+  照片載不出來時顯示「照片讀不到」而不是破圖——不要讓家長在看不到證據的情況下順手按核准。
+  若登入者不是 `config.chore_approver`，家事項目的主要按鈕變成**「代替 Vicky 確認」**（見 §9.5）。
 
 ---
 
@@ -351,16 +406,21 @@ data/
 - `lockUntil` 是 ISO 字串或 `null`；`targetAmount` 是整數或 `null`（沒設就是 `null`，不是 0）。
 - `balance` 是整數元。家長端沒有 `chores`；小孩端沒有 `kids`。
 - 小孩 session 打 snapshot 時，若活期／紅包帳戶還不存在會自動補建。
+- 小孩端的 `requests` 除了 `pending`，還要**額外帶回「今天（或本週）已決定」的 `chore_done`**，
+  含 `status` · `photoUrl` · `decidedTs` · `decidedBy` · `decidedProxy` · `decidedNote`。
+  沒有這些，chores 頁畫不出「今天已回報 / 媽媽在 9/18 晚上 9:14 確認」的狀態（§6）。
+- 家長端的 `requests` 帶 `photoUrl` 供待審清單畫縮圖，並帶 `chore_approver`
+  （放在頂層，值同 `config.chore_approver`），讓 admin 知道自己按下去是正式確認還是代理。
 
 ### 7.2 `POST`（body JSON）
 
 | action | 參數 | 說明 |
 |---|---|---|
 | `transfer` | from, to, amount | 帳戶間轉帳，**免審，直接入帳**（見 §9.2） |
-| `request` | kind, amount, choreId, note | 建立申請（僅三種 kind） |
+| `request` | kind, amount, choreId, note, **photo**, **photoMime** | 建立申請（僅三種 kind）。`kind = chore_done` 時 `choreId` 與 `photo`（壓縮後的 JPEG base64，不含 `data:` 前綴）**皆為必填**，並做一天一次檢查（見下） |
 | `cancel_request` | requestId | 小孩自己撤回 |
 | `open_account` | type, name, emoji, termMonths\|targetAmount | 開子帳戶。`termMonths` 由小孩自由填（見 §4.3），不是固定選項；**伺服器端驗證 3 ≤ termMonths ≤ 12** |
-| `admin_decide` | requestId, decision, note | 核准/退回 |
+| `admin_decide` | requestId, decision, note, **proxy** | 核准/退回。家事的核准者必須是 `config.chore_approver`，其他家長要代理時必須明確帶 `proxy: true`（見下與 §9.5） |
 | `admin_adjust` | kidId, accountId, amount, memo | 手動入帳/扣款/罰款 |
 | `admin_gift` | kidId, amount, memo | 紅包入 `gift` |
 | `admin_config` | key, value | 改 `config` 的利率等設定；改某個小孩的零用錢是改 `users.weeklyAllowance` |
@@ -368,6 +428,59 @@ data/
 | `change_password` | oldPassword, newPassword | 自己改密碼 |
 
 所有 `admin_*` 由伺服器檢查 `session.role === 'parent'`，前端不做判斷。
+
+#### `request`（`kind = chore_done`）的伺服器端驗證
+
+**下面每一條都在伺服器端執行，UI 的限制只是不要讓小孩白做工。**
+前端是公開的，手工組一個 POST 繞過畫面是小學生也做得到的事。
+驗證順序固定如下，**任何一條不過就不寫 Drive、也不寫 Sheet**：
+
+1. **身分**：`session.role === 'kid'`，`kidId` 一律取自 session，不接受請求帶。
+2. **冪等**：先查 `requests` 有沒有相同 `clientId`；有就直接回傳原本那筆，
+   **不重複建檔、不重複寫 Sheet**（見 §7.3、§7.5）。
+3. **家事存在**：`choreId` 要在 `chores` 且 `active = true`；
+   該 chore 的 `kidId` 若非空，必須等於 session 的 kidId（別人專屬的家事不能接）。
+4. **照片必填**：`photo` 缺漏、空字串、或 base64 解不開 → `ok:false, error:'photo-required'`，
+   訊息「要拍一張照片才能送出喔」。`photoMime` 只接受 `image/jpeg`。
+   解出來的位元組數若超過 `1.5 MB`，回 `error:'photo-too-big'`（前端壓縮過就不該發生，
+   見 §7.5）；若小於 `2 KB`，同樣拒絕（黑畫面／壞檔）。
+5. **一天一次**：同一個 `kidId` + `choreId`，在**同一個期間**內已經有一筆
+   `status = 'pending'` 或 `status = 'approved'` 的 `chore_done` → 拒絕，
+   `ok:false, error:'already-reported'`，訊息「這件家事今天已經報過了」。
+   - `rejected` 與 `cancelled` **不算數**：被退回或自己撤回之後可以重報，
+     否則小孩拍糊一張就整天沒得賺。
+   - **期間定義（一律以 `Asia/Taipei` 計算，不用 UTC、不用瀏覽器時區）**：
+     - `repeat = 'daily'`：日界線是台北時間 **00:00–23:59:59**。
+       實作上比對 `Utilities.formatDate(ts, 'Asia/Taipei', 'yyyy-MM-dd')` 相等即同一天。
+     - `repeat = 'weekly'`：**週日 00:00（台北）起算的七天**，與 §4.5／§9.4 的
+       「週日早上＝零用錢與對帳日」對齊。比對 `yyyy-'W'ww` 不可靠（locale 週起始日不同），
+       改用「把 ts 往前退到最近一個週日 00:00，比對那個日期字串」。
+     - `repeat = 'once'`：全期間唯一，有任何一筆 pending/approved 就不能再報。
+   - 比對用的是 `requests.ts`（伺服器寫入時間），**不是前端送的時間**。
+     離線補送的照片因此算在「補送當下」那一天——這點要讓小孩知道，
+     UI 在離線送出時明寫「等有網路才會送出，會算在送出那天」。
+6. **寫入**：先傳照片到 Drive，再寫 `requests`（`status = 'pending'`、`photoUrl`），
+   **這一步的失敗處理見 §7.5**。回傳 `{ ok:true, requestId, photoUrl }`。
+
+**不在這裡入帳。** `chore_done` 一律是 `pending`，錢要等 §9.5 的確認才進 `current`。
+
+#### `admin_decide` 的核准者規則
+
+在既有的 `session.role === 'parent'` 之上，`kind = chore_done` 多一層：
+
+| 情況 | 行為 |
+|---|---|
+| `session.userId === config.chore_approver` | 正常核准，`decidedProxy = false` |
+| 其他 parent，**沒帶** `proxy: true` | 拒絕：`ok:false, error:'needs-proxy'`，訊息「這件要 Vicky 確認，你可以按『代替確認』」。前端據此把按鈕換成代理按鈕，**不自動重送** |
+| 其他 parent，帶 `proxy: true` | 核准，`decidedBy = session.userId`、`decidedProxy = true` |
+| `role = kid` | 一律 `unauthorized`（§7.4） |
+| `decision = 'reject'` | 同樣適用上述代理規則——**退回也是決定**，也要記得是誰退的 |
+
+`proxy: true` 對 `withdraw` / `term_break` 無意義，伺服器忽略該旗標（那兩種任何家長都能決定）。
+
+不論核准或退回，一律寫回 `decidedTs`（伺服器時間）、`decidedBy`、`decidedProxy`、`decidedNote`；
+核准另外寫一筆 ledger（見 §9.5）。已經是 `approved` / `rejected` / `cancelled` 的 request
+再送一次 → `ok:false, error:'already-decided'`（兩個家長同時按下去的情況，靠 §7.3 的 script lock 分出先後）。
 
 ### 7.3 冪等與並發
 
@@ -394,10 +507,63 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 | `bad-credentials` | 帳號或密碼不對（不區分哪一個） | 留在登入頁，顯示 `message` |
 | `locked` | 連錯太多次被鎖 | 顯示還要等幾分鐘 |
 | `busy` | `LockService` 等 15 秒仍拿不到鎖（多人同時寫入） | 不是失敗也不是成功，**請使用者過幾秒重試**；不要清 session |
+| `photo-required` | 家事回報沒帶照片（或 base64 壞掉） | 回到拍照那一步，顯示「要拍一張照片才能送出喔」 |
+| `photo-too-big` | 照片超過 1.5 MB（前端沒壓縮或壓縮失敗） | 重新壓縮後再送；連兩次失敗就請小孩換一張 |
+| `already-reported` | 這件家事在本期間已有 pending/approved | **不要重試、不要進離線佇列**，把該卡片切成「今天已回報」 |
+| `needs-proxy` | 非指定核准者要核准家事，但沒按「代替確認」 | 把按鈕換成「代替 Vicky 確認」，等家長再按一次；**不自動重送** |
+| `already-decided` | 這筆 request 已經被別人決定了 | 重新抓 snapshot，顯示現況 |
 | `bad-json` / `unknown-action` / `server` | 請求格式錯、action 不認得、伺服器例外 | 顯示 `message`，視為暫時性錯誤 |
 
 > 「401」在本專案一律指這個 `error: 'unauthorized'` 的 200 回應，不是 HTTP 狀態碼。
 > 文件與程式碼裡寫「回 401」時都是這個意思。
+
+### 7.5 照片上傳（base64 → Drive）
+
+同樣的手法在 penghu-explorer 已經跑過一輪（`doPost` → `Utilities.base64Decode` →
+`folder.createFile` → `setSharing`）。這裡照抄**作法**，不共用程式碼。
+
+**前端：送出前一定要壓縮。**
+
+1. `<input type="file" accept="image/*" capture="environment">` 取得原圖
+   （手機直出 3～5 MB、4000px 起跳）。
+2. `createImageBitmap()` → 畫進 `<canvas>`，**最長邊縮到 1280px**（比 1280 小的不放大）。
+3. `canvas.toDataURL('image/jpeg', 0.8)` → 去掉 `data:image/jpeg;base64,` 前綴，
+   只送純 base64 字串。
+4. 典型結果：**150～400 KB 的 JPEG，base64 後約 200～550 KB**。
+
+> ⚠️ **這一步不是最佳化，是可行性。** Apps Script 的 `doPost` 對 POST body 有實務上限
+> （大約數 MB，而且超過時的錯誤很難看懂），執行時間上限 6 分鐘，
+> 而手機 4G 上傳 5 MB 本來就要十幾秒。原圖直送的結果是**小孩按下送出、轉圈、逾時、再按一次**——
+> 然後 Drive 裡出現兩張照片。**壓縮失敗（canvas 例外、EXIF 方向怪、HEIC 解不開）時，
+> 一律不要 fallback 成送原圖，直接請小孩重拍。**
+>
+> EXIF 方向要處理：iPhone 直拍的照片畫進 canvas 常常躺平。
+> 用 `createImageBitmap(file, { imageOrientation: 'from-image' })`，
+> 不支援的瀏覽器就接受躺平（家長看得懂就好），不要為此自寫 EXIF parser。
+
+**後端：照片寫在 script lock 外面，Sheet 寫在裡面。**
+
+Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.3 的 `LockService` 區段，
+全家會因為一張照片一起卡在 `busy`。所以順序是：
+
+1. （鎖外）冪等檢查：`requests` 有沒有這個 `clientId`？有 → 直接回傳原結果，結束。
+2. （鎖外）**先在 `HappyBank 家事照片/<kidId>/` 找有沒有同名檔**
+   （檔名含 `clientId` 前 8 碼，見 §5）。有 → 重用它的 URL，不重複建檔。
+   沒有 → `createFile` + `setSharing(ANYONE_WITH_LINK, VIEW)`。
+3. （鎖內）重跑一次一天一次檢查 + 冪等檢查，然後 append `requests`。
+
+> ⚠️ **Drive 寫成功、Sheet 寫失敗怎麼辦？**
+> 這個順序下，失敗的後果是 **Drive 裡多一張沒有任何 request 指向的孤兒照片**——
+> 佔空間，但不會有人少拿錢、也不會有人多拿錢。這是刻意選的方向：
+> **寧可多一張照片，也不要出現「Sheet 說做完了、但沒有證據」的 request。**
+> 反過來（先寫 Sheet 再傳照片）會產生 `photoUrl` 空白的 pending，家長看不到證據只能盲審。
+> 孤兒照片由 §7.3 的 `admin_recalc` 順便回報數量（不自動刪，見 §10）；
+> 而因為檔名帶 `clientId`，離線佇列重送同一筆時會**認出既有檔案並重用**，不會越積越多。
+
+**離線佇列**：帶照片的 `request` 一樣進 IndexedDB queue，但 base64 會讓 queue 變肥——
+**單一佇列項目超過 1 MB 就不要存**，直接告訴小孩「現在沒網路，等一下有網路再報一次」。
+另外 `already-reported` 與 `photo-required` 是**永久性失敗**，收到就把該項目丟出佇列，
+不要無限重試（§7.4）。
 
 ---
 
@@ -452,7 +618,7 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 
 | 動作 | 需核准 | 理由 |
 |---|---|---|
-| `chore_done` 回報家事完成 | ✅ **要審** | 錢從現實進來。「我倒了垃圾」只有家長能證實，這是最需要把關的一項 |
+| `chore_done` 回報家事完成 | ✅ **要審** | 錢從現實進來。「我倒了垃圾」只有家長能證實，這是最需要把關的一項。**必須附照片，且只有 `config.chore_approver`（或代理）能確認——細節見 §9.5** |
 | `withdraw` 提領現金 | ✅ **要審** | 錢離開系統變成真鈔，家長要實際掏錢 |
 | `term_break` 定存提前解約 | ✅ **要審** | 不是邊界問題，而是**打破自己的承諾**，要有人擋一下、問一句「真的嗎？」 |
 | 主帳戶 → 定存／目標 | ❌ 免審 | 存錢，零摩擦鼓勵。小孩按下去就成立 |
@@ -494,6 +660,80 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
   急件仍可隨時核准，只是不必天天看。
 - 核准時寫 ledger，`refId` 指向 requestId；退回不寫 ledger。
 
+### 9.5 家事：照片證據與代理確認 ✅ 已定案
+
+家事是 §9.2 分級表裡「要審」的那一支，但它跟提領／解約有兩點不一樣：
+**它需要證據**，而且**它的審核者是指定的人**。
+
+#### 一、照片證據
+
+- **每回報一件家事，就要拍一張照片**。沒有照片不能送出——UI 把按鈕 disable，
+  伺服器再擋一次（`photo-required`，§7.2）。這是本功能的核心規則，不是加分項。
+- 照片是給家長「看一眼就知道真的做了」用的，不追求畫質：壓到最長邊 1280px（§7.5）。
+- 照片存 Drive、URL 存 `requests.photoUrl`（§5），**待審清單直接顯示縮圖**（§6）。
+- **不強制照片一定拍得出家事**——會不會有小孩拍一張隨便的照片交差？會。
+  這不是用程式擋的事，是家長看到爛證據就按退回、順手講一句的事。
+  系統要做的只是「讓證據存在、讓家長看得到」。
+
+#### 二、一天一次
+
+同一件家事一天（weekly 則一週）只能報一次，**由伺服器端擋**，
+期間定義與判定規則寫在 §7.2。理由很直接：不擋的話，倒一次垃圾按十次就是十倍零用錢，
+而這件事小孩一定會試。只擋 UI 等於沒擋。
+
+被退回或自己撤回的不佔扣打，可以重報——不然拍糊一張就整天沒得賺，
+小孩會學到的是「系統很爛」而不是「要好好做事」。
+
+#### 三、誰能確認
+
+- **指定核准者是 `config.chore_approver`，預設 `vicky`（媽媽）。**
+  家事是她在管，由她認定做得好不好。
+- **另一位家長（Aug）可以代理**，但要**多按一次「代替確認」**：
+  第一次按核准伺服器回 `needs-proxy`，UI 把按鈕換成「代替 Vicky 確認」，
+  再按一次才成立（帶 `proxy: true`，§7.2）。
+  這一下多出來的摩擦是刻意的——代理是例外，不該跟正常核准一樣順手。
+- **為什麼不嚴格只准 Vicky**：她出差或手機沒電的那幾天，小孩的錢會全部卡住，
+  等她回來一次補審。對小孩來說「做了事卻沒拿到錢」的體感就是系統壞掉。
+  留一條代理路，同時把代理這件事記在紀錄上，比卡住好。
+- 代理**不是偷偷來的**：`decidedProxy = true` 會寫進 request、寫進 ledger 的 `memo`，
+  小孩端與交易明細都看得到「Aug 代替媽媽確認」。Vicky 回來翻明細就知道這幾天誰批了什麼。
+
+#### 四、確認之後記錄什麼
+
+核准時（在 §7.3 的 script lock 內，一次寫完）：
+
+1. 更新 `requests`：`status = 'approved'`、`decidedTs`（伺服器時間）、
+   `decidedBy`（**實際按的人**）、`decidedProxy`、`decidedNote`（核准時選填）。
+2. 寫一筆 `ledger`：
+
+   | 欄位 | 值 |
+   |---|---|
+   | `type` | `chore` |
+   | `kidId` | request 的 kidId |
+   | `accountId` | 該小孩的 **`current` 活期主帳戶**（§2：所有收入先進活期） |
+   | `amount` | `chores.reward` 的**伺服器端查值**，正數。**不採用前端送的金額** |
+   | `by` | **實際核准者的 userId**（代理時就是 `aug`，不是 `vicky`） |
+   | `refId` | requestId |
+   | `memo` | 「倒垃圾（9/18）」；代理時後綴「· Aug 代替 Vicky 確認」 |
+
+3. 退回不寫 ledger，但一樣要寫 `decidedBy` / `decidedProxy` / `decidedTs`，
+   `decidedNote` 退回時必填（§9.4）。
+
+#### 五、確認時間與確認人要看得到
+
+這是明文要求，兩個地方都要有：
+
+- **小孩端 chores 卡片**：「✅ 媽媽在 9/18 晚上 9:14 確認 ＋10 元」。
+  代理時寫「✅ 爸爸代替媽媽在 9/18 晚上 9:14 確認 ＋10 元」。
+  用**稱謂**（媽媽／爸爸）不是 userId，時間用「9/18 晚上 9:14」這種小孩讀得懂的寫法，
+  不要 ISO 字串。時區一律 `Asia/Taipei`。
+- **history 交易明細**：`chore` 那筆列出金額、家事名稱、確認人與確認時間，
+  可以點開看當時那張照片。
+
+`chore` 是唯一一種「入帳時間」與「事情發生時間」可能差很多的收入
+（週五做的家事週日才批），明細上要以**核准時間**為 ledger 的 `ts`，
+但 memo 裡帶上回報日期，免得小孩對不起來。
+
 ---
 
 ## 10. 待決事項 🔴
@@ -505,6 +745,19 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
   隱藏 + 保護只擋編輯不擋讀取（見 §5、§8.1）。在決定前的鐵則是**這份 Sheet 不分享給任何人**；
   若之後真的需要讓家人看帳，要先把 `credentials` 搬到另一份不分享的試算表，
   或確定一律走 app 的家長模式
+- 🔴 **家事照片的保存期限與 Drive 配額**：照片目前**永久留在**擁有者的 Drive，
+  三個小孩 × 每天約 3 件 ≈ 一年 3000 張、以 300 KB 計約 1 GB——
+  免費 15 GB 額度撐得住好幾年，但那個額度是跟 Gmail 共用的，而且沒有人會去清。
+  要不要加一個「保留 N 天後自動刪除」的 trigger（刪檔但保留 `requests` 紀錄，
+  `photoUrl` 標記為已過期）？**還沒決定**，v1 先不刪。
+- 🔴 **照片分享模式**：現在是 `ANYONE_WITH_LINK`（§5 已標風險）。
+  要不要改成 private + Apps Script 代理取圖（`fileId` + session 驗證）？
+  成本是每張圖多一趟往返、家長端待審清單會變慢。**v1 先用連結分享，但這筆帳記著。**
+- 🔴 **小孩能不能自己刪照片**：目前只能**撤回整筆 request**（照片留在 Drive 成為孤兒）。
+  要不要讓撤回時連照片一起刪？好處是小孩對自己的影像有一點控制權；
+  壞處是「拍到不該拍的東西 → 撤回 → 家長永遠不知道」。**還沒決定。**
+- 🔴 **孤兒照片的清理**：Drive 寫成功但 Sheet 寫失敗會留下無主檔案（§7.5）。
+  v1 只由 `admin_recalc` 回報數量，**不自動刪**——自動刪檔的程式不值得在這個階段信任。
 - 🔴 **是否要「消費紀錄」**——提領後小孩回報實際買了什麼（教記帳，但會增加摩擦）。
   **仍在待討論**，v1 不實作、不設計資料欄位
 
@@ -519,7 +772,30 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 | **M3 自動化** | 每週零用錢 trigger（**週日早上 8:00**，同時是對帳日，見 §9.4）、每月計息 trigger、到期提醒 | 跨月測試利息正確、定存到期轉 matured |
 | **M4 審核** | requests（三種 kind）+ admin 待審清單 | 小孩申請提領 → 家長核准 → 入帳；退回看得到理由 |
 | **M5 離線與韌性** | IndexedDB queue + clientId 冪等 + 快照新鮮度 | 飛航模式操作 → 復網自動補送且不重複入帳 |
-| **M6 家事與獎勵** | chores 清單、回報流程 | 小孩回報 → 家長核准 → 入帳 |
+| **M6 家事與獎勵（含照片）** ⬆️ *提前到 M4 之後緊接著做* | chores 清單、**拍照＋canvas 壓縮**、**Drive 照片子系統**、`request(chore_done)` 的一天一次伺服器檢查、`admin_decide` 的指定核准者與**代理確認**、確認時間／確認人顯示 | 小孩拍照回報 → Vicky（或 Aug 代理）確認 → 入活期；沒照片送不出、同一件一天報不了第二次；小孩看得到「媽媽在 X 時確認」 |
+
+### M6 的範圍變動（2026-09-18）
+
+原本 M6 是最後一站（「審核與家事是家長端的管理需求，可以晚一點」）。
+**現在往前拉**，理由不是它比較重要，而是它現在**多了一整個子系統**：
+
+- **照片子系統是新東西**，M1–M5 完全沒有它：前端 canvas 壓縮、base64 傳輸、
+  Apps Script 的 Drive 建檔與分享、`photoUrl` 回寫、離線佇列的大 payload 處理（§7.5）。
+  這條路 penghu-explorer 已經走通過，風險比從零設計低，但**工作量是實打實的一整塊**，
+  不是在 chores 清單上加個欄位。
+- **它相依於 M4**（requests + admin 待審清單）與 **M5**（clientId 冪等）。
+  冪等在這裡不只是「不要重複入帳」，還是「不要在 Drive 留下重複照片」——
+  沒有 M5 就做 M6，Drive 會變垃圾場。所以順序仍是 **M4 → M5 → M6**，
+  M6 只是從「有空再說」變成**排定要做**。
+- 誠實地說：**M6 現在是本專案最大的一個里程碑**，比 M4 大。
+  照片壓縮、Drive、代理確認、一天一次的期間判定，四件事沒有一件是十行寫得完的。
+  若時間不夠，可切出 **M6a（無照片的家事回報＋代理確認）**先上線，
+  **M6b 補照片**——但要清楚知道 M6a 少掉的正是「證據」這個核心規則，
+  上線就會有人開始亂報，所以 M6a 只適合當幾天的過渡，不適合當終點。
+
+`config.chore_approver` 與 `requests` 的 `photoUrl` / `decidedBy` / `decidedProxy`
+三個新欄位要進 `Setup.gs` 的 `SCHEMA` 與 `CONFIG_SEED`，
+`setup()` 可重複執行、只補表頭，**既有資料不會動**（舊列這三欄留空即可）。
 
 **M1 現況（2026-09-18）**：程式碼已完成，只剩把 Apps Script 部署成 Web App、
 把 `/exec` 網址填進 `js/config.js` 的 `apiUrl`（步驟見 [docs/DEPLOY.md](docs/DEPLOY.md)）。
@@ -530,7 +806,8 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 - 前端已實作：登入頁（8 位數字鍵盤）、**餘額頁**（帳戶卡 + 總資產 + 離線快取）。
 - **尚未實作**：M3 的兩個 time-driven trigger（每週零用錢＝週日早上 8:00、每月計息），
   以及 §7.2 的 `transfer` · `request` · `cancel_request` · `open_account` ·
-  `admin_decide` · `admin_config` · `admin_revoke_session`。
+  `admin_decide` · `admin_config` · `admin_revoke_session`，
+  以及 M6 的照片子系統（Drive 建檔、`photoUrl`、代理確認）。
 - 前端的邏輯 401 處理（收到 `error:'unauthorized'` 就清 session 導回登入頁，§7.4）已接上，
   快照快取也改成每人一個 key，避免共用平板上看到前一個人的餘額。
 
@@ -553,6 +830,25 @@ M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持�
 - [ ] 開定存確認頁顯示「解鎖日期」大字 + 到期金額，未勾選不能按確認
 - [ ] 提領／家事／解約送出後顯示「等爸爸媽媽確認中」，可自行撤回
 - [ ] 家長退回申請時必須填理由，小孩看得到
+- [ ] **家事沒拍照就不能送出**：送出鍵是灰的；**手工組一個沒有 `photo` 的請求送出去，伺服器回 `photo-required`**
+- [ ] 手機直拍的 4000px 原圖，送出前被壓到最長邊 1280px / JPEG 0.8，實際上傳約 200～550 KB；
+      iPhone 直拍不會躺平；壓縮失敗時請小孩重拍，**不會偷偷送原圖**
+- [ ] **同一件 daily 家事一天報第二次被擋掉**，回 `already-reported`；
+      **即使手工組請求繞過 UI 也擋得住**（日界線以 `Asia/Taipei` 00:00 計，跨午夜再報才算新的一天）
+- [ ] weekly 家事在同一週內報第二次被擋掉，下個週日才解禁
+- [ ] 被退回或自己撤回的家事**可以當天重報**，不佔一天一次的扣打
+- [ ] 家長端待審清單看得到照片縮圖，點得開大圖；照片載不出來時顯示「照片讀不到」而不是破圖
+- [ ] Vicky 按核准 → 直接成立；**Aug 按核准 → 先被擋下並出現「代替 Vicky 確認」，再按一次才成立**
+- [ ] **Aug 代理確認後，request 與 ledger 都看得出是代的**（`decidedBy = aug`、`decidedProxy = true`、
+      memo 有「Aug 代替 Vicky 確認」），Vicky 事後翻明細查得到
+- [ ] 小孩端看得到「✅ 媽媽在 9/18 晚上 9:14 確認 ＋10 元」，代理時寫「爸爸代替媽媽…」；
+      交易明細那筆 `chore` 也看得到確認人與確認時間，並點得開當時那張照片
+- [ ] 核准的金額來自伺服器查 `chores.reward`——**前端改金額送出也沒用**
+- [ ] 家事獎金一律進**活期主帳戶**，不會進紅包或定存
+- [ ] 兩個家長同時核准同一筆，只入帳一次，第二個收到 `already-decided`
+- [ ] 飛航模式拍照回報 → 復網自動補送，**Drive 裡只有一張照片、只入帳一次**（檔名帶 `clientId`）
+- [ ] 把 `config.chore_approver` 改成 `aug` → 換成 Aug 直接核准、Vicky 要按代理；
+      **改設定不會讓過去那些代理紀錄變成非代理**
 - [ ] 期數選擇器只給得出 3～12 個月；`open_account` 對期數小於 3 或大於 12 的請求一律拒絕，
       **即使繞過 UI 手動組請求送出也擋得住**
 - [ ] 每週零用錢依各小孩的 `users.weeklyAllowance` 於**週日早上 8:00** 發放，金額可以人人不同
