@@ -238,3 +238,21 @@ test('admin_gift 不該把紅包入到已關閉的 gift 帳戶', () => {
   assert.strictEqual(snap.accounts.reduce((n, a) => n + a.balance, 0), 600,
     '小孩必須看得到這 600 元');
 });
+
+test('clientId 的冪等比對必須區分大小寫', () => {
+  const gs = freshBank();
+  const parent = login(gs, 'aug');
+  login(gs, 'momo');
+  const cur = accountOf(gs, 'momo', 'current');
+
+  const a = gs.$.call({ action: 'admin_adjust', session: parent, kidId: 'momo',
+    accountId: cur.accountId, amount: 100, memo: '第一筆', clientId: 'ABC-123' });
+  // 只差大小寫 = 不同的兩筆交易。若比對時把兩邊轉小寫，第二筆會被誤判成重複而消失。
+  const b = gs.$.call({ action: 'admin_adjust', session: parent, kidId: 'momo',
+    accountId: cur.accountId, amount: 100, memo: '第二筆', clientId: 'abc-123' });
+
+  assert.strictEqual(a.ok, true);
+  assert.strictEqual(b.ok, true);
+  assert.notStrictEqual(b.duplicate, true, '大小寫不同就不是同一筆，不該被當成重複');
+  assert.strictEqual(gs.accountBalance(cur.accountId), 200, '兩筆都要入帳');
+});

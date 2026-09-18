@@ -806,10 +806,8 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
   三個小孩 × 每天約 3 件 ≈ 一年 3000 張、以 300 KB 計約 1 GB——
   免費 15 GB 額度撐得住好幾年，但那個額度是跟 Gmail 共用的，而且沒有人會去清。
   要不要加一個「保留 N 天後自動刪除」的 trigger（刪檔但保留 `requests` 紀錄，
-  `photoUrl` 標記為已過期）？**還沒決定**，v1 先不刪。
-- 🔴 **照片分享模式**：現在是 `ANYONE_WITH_LINK`（§5 已標風險）。
-  要不要改成 private + Apps Script 代理取圖（`fileId` + session 驗證）？
-  成本是每張圖多一趟往返、家長端待審清單會變慢。**v1 先用連結分享，但這筆帳記著。**
+  讓 `chore_photo` 回 `photo-missing`、前端顯示「照片已過期」）？**還沒決定**，v1 先不刪。
+  備份策略同樣未定。
 - 🔴 **小孩能不能自己刪照片**：目前只能**撤回整筆 request**（照片留在 Drive 成為孤兒）。
   要不要讓撤回時連照片一起刪？好處是小孩對自己的影像有一點控制權；
   壞處是「拍到不該拍的東西 → 撤回 → 家長永遠不知道」。**還沒決定。**
@@ -837,7 +835,9 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 **現在往前拉**，理由不是它比較重要，而是它現在**多了一整個子系統**：
 
 - **照片子系統是新東西**，M1–M5 完全沒有它：前端 canvas 壓縮、base64 傳輸、
-  Apps Script 的 Drive 建檔與分享、`photoUrl` 回寫、離線佇列的大 payload 處理（§7.5）。
+  Apps Script 的 Drive 建檔（private，不分享）、`photoFileId` 回寫、
+  `chore_photo` 代理取圖端點（§7.6）與前端的延遲載入／記憶體快取、
+  離線佇列的大 payload 處理（§7.5）。
   這條路 penghu-explorer 已經走通過，風險比從零設計低，但**工作量是實打實的一整塊**，
   不是在 chores 清單上加個欄位。
 - **它相依於 M4**（requests + admin 待審清單）與 **M5**（clientId 冪等）。
@@ -850,7 +850,7 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
   **M6b 補照片**——但要清楚知道 M6a 少掉的正是「證據」這個核心規則，
   上線就會有人開始亂報，所以 M6a 只適合當幾天的過渡，不適合當終點。
 
-`config.chore_approver` 與 `requests` 的 `photoUrl` / `decidedBy` / `decidedProxy`
+`config.chore_approver` 與 `requests` 的 `photoFileId` / `decidedBy` / `decidedProxy`
 三個新欄位要進 `Setup.gs` 的 `SCHEMA` 與 `CONFIG_SEED`，
 `setup()` 可重複執行、只補表頭，**既有資料不會動**（舊列這三欄留空即可）。
 
@@ -864,7 +864,7 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 - **尚未實作**：M3 的兩個 time-driven trigger（每週零用錢＝週日早上 8:00、每月計息），
   以及 §7.2 的 `transfer` · `request` · `cancel_request` · `open_account` ·
   `admin_decide` · `admin_config` · `admin_revoke_session`，
-  以及 M6 的照片子系統（Drive 建檔、`photoUrl`、代理確認）。
+  以及 M6 的照片子系統（Drive 建檔、`photoFileId`、`chore_photo` 取圖、代理確認）。
 - 前端的邏輯 401 處理（收到 `error:'unauthorized'` 就清 session 導回登入頁，§7.4）已接上，
   快照快取也改成每人一個 key，避免共用平板上看到前一個人的餘額。
 
@@ -895,6 +895,13 @@ M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持�
 - [ ] weekly 家事在同一週內報第二次被擋掉，下個週日才解禁
 - [ ] 被退回或自己撤回的家事**可以當天重報**，不佔一天一次的扣打
 - [ ] 家長端待審清單看得到照片縮圖，點得開大圖；照片載不出來時顯示「照片讀不到」而不是破圖
+- [ ] **照片沒有登入就看不到**：把 Drive 檔案 URL 直接貼到無痕視窗會被權限牆擋下；
+      不帶 `session` 打 `chore_photo` 回 `unauthorized`
+- [ ] **小孩 A 手工組一個請求去要小孩 B 的照片會被拒**（`not-your-photo`）；
+      同一支端點家長抓任何一筆都拿得到
+- [ ] **待審清單的縮圖延遲載入不會讓頁面卡住**：十筆待審時清單立刻畫出來（先 spinner），
+      照片一張張補上；來回捲動不會重抓（記憶體快取），且照片不會被寫進 localStorage
+- [ ] Drive 上的照片檔被刪掉後，該筆待審顯示「照片讀不到」（`photo-missing`），畫面不會壞掉
 - [ ] Vicky 按核准 → 直接成立；**Aug 按核准 → 先被擋下並出現「代替 Vicky 確認」，再按一次才成立**
 - [ ] **Aug 代理確認後，request 與 ledger 都看得出是代的**（`decidedBy = aug`、`decidedProxy = true`、
       memo 有「Aug 代替 Vicky 確認」），Vicky 事後翻明細查得到

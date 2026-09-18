@@ -352,7 +352,10 @@ function postLedger(opts) {
   return withLock(() => {
     // 冪等：同一個 clientId 只會入帳一次（SPEC §7.3）
     if (opts.clientId) {
-      const dup = findBy('ledger', 'clientId', opts.clientId);
+      // 這裡不能用 findBy——它會把兩邊轉小寫，兩筆只差大小寫的不同交易
+      // 會被誤判成重複，第二筆的錢就無聲消失了。
+      const want = String(opts.clientId);
+      const dup = readTable('ledger').filter(l => String(l.clientId) === want)[0];
       if (dup) return { ok: true, duplicate: true, balanceAfter: num(dup.balanceAfter, 0) };
     }
 
