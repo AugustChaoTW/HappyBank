@@ -296,3 +296,124 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 /* 觸控目標：小孩用手指按，48px 以下都不算數 */
 .chore .btn-primary { min-height: 56px; font-size: 1.15rem; }
 .chore .btn-text { min-height: 48px; }
+
+/* --- 家長模式：首頁小孩卡 + 待審清單 ------------------------------------ */
+/* 家長是大人，資訊可以比小孩頁密一點，但按鈕仍然 ≥44px——
+   核准／退回按錯的代價是真的錢，不能讓手指邊緣按到。 */
+
+.adm-kid {
+  background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 14px 16px; margin-bottom: 12px;
+}
+.adm-kid-top { display: flex; align-items: center; gap: 10px; }
+.adm-kid-face { font-size: 1.8rem; line-height: 1; }
+.adm-kid-name { flex: 1; font-size: 1.1rem; font-weight: 800; }
+.adm-kid-total { font-size: 1.5rem; font-weight: 800; color: var(--c-brand-dark); }
+.adm-kid-total small { font-size: .85rem; color: var(--c-muted); font-weight: 700; }
+.adm-kid-accts { list-style: none; margin-top: 8px; }
+.adm-kid-accts li {
+  display: flex; justify-content: space-between; gap: 10px;
+  font-size: .9rem; padding: 5px 0; border-top: 1px solid #eef2ef; color: var(--c-muted);
+}
+.adm-kid-accts b { color: var(--c-text); }
+
+.adm-hero {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 14px 18px; margin-bottom: 12px;
+}
+.adm-hero-label { font-size: .85rem; color: var(--c-muted); }
+.adm-hero-num { font-size: 2.2rem; font-weight: 800; line-height: 1.1; color: var(--c-brand-dark); }
+.adm-hero-num small { font-size: .9rem; color: var(--c-muted); }
+.adm-hero .adm-all { margin: 0 0 0 auto; width: auto; padding: 14px 18px; min-height: 48px; font-size: 1rem; }
+.adm-batch {
+  background: #fff8e6; color: #7a5300; border-radius: 14px; padding: 10px 14px;
+  font-size: .9rem; font-weight: 700; margin-bottom: 12px;
+}
+
+.adm-list { display: flex; flex-direction: column; gap: 10px; }
+.adm-row {
+  background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 12px 14px; border-left: 6px solid var(--c-gold);
+}
+.adm-row.done { border-left-color: var(--c-brand); opacity: .7; }
+.adm-row.needs-proxy { border-left-color: #8a6bd1; }
+.adm-row.error, .adm-row.stale { border-left-color: var(--c-danger); }
+
+.adm-main { display: flex; gap: 12px; align-items: flex-start; }
+.adm-info { flex: 1; min-width: 0; }
+.adm-title { font-size: 1.05rem; font-weight: 700; line-height: 1.4; }
+.adm-amt {
+  font-size: .82rem; font-weight: 800; color: var(--c-brand-dark);
+  background: #e6f3ea; padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+}
+.adm-sub { font-size: .82rem; color: var(--c-muted); margin-top: 3px; }
+.adm-kidnote { font-size: .88rem; margin-top: 6px; line-height: 1.5; }
+.adm-result { font-size: .88rem; font-weight: 700; margin-top: 8px; line-height: 1.5; }
+.adm-result.ok { color: var(--c-brand-dark); }
+.adm-result.warn { color: var(--c-danger); }
+
+/* 縮圖延遲抓（照片是 private 的，§7.6）：先佔位＋spinner，抓不到就寫字不要破圖 */
+.adm-thumb {
+  width: 64px; height: 64px; flex: none; border-radius: 12px;
+  object-fit: cover; background: #eef2ef; cursor: zoom-in;
+}
+.adm-thumb.loading, .adm-thumb.bad, .adm-thumb.none {
+  display: flex; align-items: center; justify-content: center; cursor: default;
+  font-size: .68rem; color: var(--c-muted); text-align: center; padding: 4px;
+}
+
+.adm-actions { display: flex; gap: 10px; margin-top: 10px; }
+.adm-actions button { min-height: 44px; }
+.btn-approve, .btn-reject {
+  flex: 1; font-family: inherit; font-size: 1rem; font-weight: 700;
+  border-radius: 14px; border: none; cursor: pointer; padding: 12px 10px;
+}
+.btn-approve { background: var(--c-brand); color: #fff; }
+.btn-approve:disabled { background: #b9cfc1; }
+.btn-reject { background: #fdecec; color: #8f2a2a; flex: 0 0 96px; }
+.btn-reject.solid { background: var(--c-danger); color: #fff; flex: 1; }
+.btn-reject:disabled { background: #f0e3e3; color: #b89a9a; }
+
+/* 退回理由：一鍵範本 + 自由填。看不懂的退回比不退回更傷（§9.4） */
+.adm-reject { margin-top: 10px; border-top: 1px dashed #e2e9e4; padding-top: 10px; }
+.adm-reject-hint { font-size: .82rem; color: var(--c-muted); margin-bottom: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  font-family: inherit; font-size: .88rem; min-height: 44px; padding: 8px 14px;
+  border-radius: 999px; border: 1px solid #dfe8e2; background: #f7faf8;
+  color: var(--c-text); cursor: pointer;
+}
+.chip:active { background: #e6f3ea; }
+.adm-note-input {
+  width: 100%; margin-top: 8px; padding: 12px; border-radius: 14px;
+  border: 2px solid #d6e2da; font-family: inherit; font-size: 1rem; resize: vertical;
+}
+.adm-note-input:focus { outline: none; border-color: var(--c-brand); }
+.adm-reject .btn-text { margin: 0; flex: 0 0 auto; }
+
+/* 手動調帳 / 紅包入帳 */
+.adm-tools {
+  background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 4px 16px 12px; margin-top: 20px;
+}
+.adm-tools summary {
+  font-size: 1rem; font-weight: 700; padding: 14px 0; cursor: pointer; min-height: 44px;
+}
+.adm-form { display: flex; flex-direction: column; gap: 10px; padding-bottom: 12px; }
+.adm-form + .adm-form { border-top: 1px solid #eef2ef; padding-top: 14px; }
+.adm-form label { font-size: .85rem; color: var(--c-muted); display: flex; flex-direction: column; gap: 5px; }
+.adm-form select, .adm-form input {
+  font-family: inherit; font-size: 1rem; min-height: 46px; padding: 10px 12px;
+  border-radius: 12px; border: 2px solid #d6e2da; background: #fff; color: var(--c-text);
+}
+.adm-form select:focus, .adm-form input:focus { outline: none; border-color: var(--c-brand); }
+.adm-form .btn-primary { margin-top: 4px; padding: 14px; font-size: 1.05rem; }
+.adm-tool-msg { font-size: .88rem; color: var(--c-brand-dark); font-weight: 700; min-height: 20px; }
+
+/* 照片放大：縮圖看不清楚就不該按核准 */
+.photo-modal {
+  position: fixed; inset: 0; z-index: 20; background: rgba(12, 24, 18, .88);
+  display: flex; align-items: center; justify-content: center; padding: 16px; cursor: zoom-out;
+}
+.photo-modal img { max-width: 100%; max-height: 100%; border-radius: 14px; }

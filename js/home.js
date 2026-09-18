@@ -159,20 +159,47 @@ const Home = (() => {
     b.classList.toggle('hidden', !text);
   }
 
-  async function render(user) {
-    const u = user || Auth.user() || {};
-
-    if (u.role === 'parent') {
-      showBanner('');
-      el('home-fresh').textContent = '';
+  // 家長的快照含全家的錢，不寫 localStorage：共用平板上留一份家長快照，
+  // 下一個登入的小孩就有機會在 DevTools 看到兄弟姊妹的餘額。
+  async function renderParent(u) {
+    showBanner('');
+    el('home-fresh').textContent = '';
+    if (!Api.configured()) {
       el('home-body').innerHTML = `
         <div class="placeholder">
           <div class="big">🛠️</div>
           <h2>${esc(u.emoji || '🧑')} 哈囉，${esc(u.displayName || '')}！</h2>
-          <p>家長模式還在蓋。</p>
+          <p>後端還沒接上，等銀行蓋好才看得到小孩的帳。</p>
         </div>`;
       return;
     }
+
+    el('home-body').innerHTML = '<p class="empty">載入中…</p>';
+    let res = null;
+    try { res = await Api.get('snapshot'); } catch (err) { console.warn('snapshot failed', err); }
+
+    if (res && res.ok && res.kids) {
+      el('home-body').innerHTML = Admin.parentBody(res);
+      const when = Money.formatWhen(res.serverTs);
+      el('home-fresh').textContent = when ? `更新於 ${when}` : '';
+      return;
+    }
+    if (res && res.error === 'unauthorized') { el('home-body').innerHTML = ''; return; }
+
+    el('home-body').innerHTML = `
+      <div class="placeholder">
+        <div class="big">${res && res.error === 'busy' ? '⏳' : '📡'}</div>
+        <h2>${res && res.error === 'busy' ? '銀行有點忙' : '連不上銀行'}</h2>
+        <p>${esc((res && res.message) || '等一下再試一次。')}</p>
+      </div>`;
+  }
+
+  async function render(user) {
+    const u = user || Auth.user() || {};
+
+    // 家長首頁的版面整塊交給 admin.js（每個小孩的總資產 + 待審入口），
+    // 這裡只負責抓 snapshot 與處理連不上的情況——家長版面的細節不該漏進小孩的頁面邏輯裡。
+    if (u.role === 'parent') return renderParent(u);
 
     if (!Api.configured()) {
       showBanner('示範資料 · 後端還沒接上，這些數字是假的');

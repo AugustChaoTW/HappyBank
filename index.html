@@ -87,6 +87,22 @@
     <input type="file" id="chore-photo-input" accept="image/*" capture="environment" hidden>
   </section>
 
+  <!-- 家長審核頁（SPEC §6 admin、§9.4）-->
+  <section id="view-admin" class="view hidden">
+    <div class="page-head">
+      <button class="btn-back" id="btn-admin-back">← 回首頁</button>
+      <h2>🛠️ 家長審核</h2>
+    </div>
+    <p class="msg error hidden" id="admin-msg"></p>
+    <div id="admin-body"></div>
+    <p id="admin-fresh" class="freshness"></p>
+  </section>
+
+  <!-- 照片放大：待審清單的縮圖太小，看不清楚就不該按核准 -->
+  <div id="photo-modal" class="photo-modal hidden">
+    <img id="photo-modal-img" alt="家事照片">
+  </div>
+
   <footer class="app-footer">
     🏦 快樂銀行 · <span id="version-info">版本載入中…</span>
   </footer>
@@ -97,6 +113,7 @@
   <script src="js/money.js"></script>
   <script src="js/photo.js"></script>
   <script src="js/chores.js"></script>
+  <script src="js/admin.js"></script>
   <script src="js/home.js"></script>
   <script src="js/login.js"></script>
   <script src="js/version.js"></script>
