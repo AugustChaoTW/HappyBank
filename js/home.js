@@ -140,6 +140,7 @@ const Home = (() => {
       <div class="interest-hook">
         這個月預計利息 <strong>${Money.format(interest)}</strong> 元
       </div>
+      ${typeof Chores !== 'undefined' ? Chores.navCard(snap) : ''}
       <div class="accts">${accounts.map(accountCard).join('')}</div>
       <h3 class="sec-title">最近交易</h3>
       ${ledger.length

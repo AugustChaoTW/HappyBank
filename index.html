@@ -73,6 +73,20 @@
     <button class="btn-text" id="btn-logout">登出</button>
   </section>
 
+  <!-- 家事回報頁（SPEC §6 chores）-->
+  <section id="view-chores" class="view hidden">
+    <div class="page-head">
+      <button class="btn-back" id="btn-chores-back">← 回首頁</button>
+      <h2>🧹 家事賺錢</h2>
+    </div>
+    <p class="msg error hidden" id="chores-msg"></p>
+    <p class="chores-summary" id="chores-summary"></p>
+    <div id="chores-body"></div>
+    <p id="chores-fresh" class="freshness"></p>
+    <!-- 不自建相機 UI，交給系統 App（SPEC §6 拍照流程）-->
+    <input type="file" id="chore-photo-input" accept="image/*" capture="environment" hidden>
+  </section>
+
   <footer class="app-footer">
     🏦 快樂銀行 · <span id="version-info">版本載入中…</span>
   </footer>
@@ -81,6 +95,8 @@
   <script src="js/api.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/money.js"></script>
+  <script src="js/photo.js"></script>
+  <script src="js/chores.js"></script>
   <script src="js/home.js"></script>
   <script src="js/login.js"></script>
   <script src="js/version.js"></script>
