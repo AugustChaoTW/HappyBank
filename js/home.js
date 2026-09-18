@@ -90,7 +90,15 @@ const Home = (() => {
     return '';
   }
 
-  function accountCard(a) {
+  // 零用錢與家事這兩顆大按鈕只長在「活期」卡上：這兩件事賺到的錢就是進這個帳戶，
+  // 按鈕貼在哪張卡上本身就是在講因果。紅包／定存／目標卡不該有（那些錢不是這樣來的）。
+  function currentActions(snap) {
+    const a = typeof Allowance !== 'undefined' ? Allowance.homeButton(snap) : '';
+    const c = typeof Chores !== 'undefined' ? Chores.homeButton(snap) : '';
+    return (a || c) ? `<div class="acct-actions">${a}${c}</div>` : '';
+  }
+
+  function accountCard(a, snap) {
     const rate = Math.round((Number(a.rateMonthly) || 0) * 100);
     const badge = rate > 0
       ? `<span class="rate">月息 ${rate}%</span>`
@@ -104,6 +112,7 @@ const Home = (() => {
         </div>
         <div class="acct-balance">${Money.format(a.balance)} <small>元</small></div>
         ${accountHint(a)}
+        ${a.type === 'current' ? currentActions(snap) : ''}
       </div>`;
   }
 
@@ -140,8 +149,7 @@ const Home = (() => {
       <div class="interest-hook">
         這個月預計利息 <strong>${Money.format(interest)}</strong> 元
       </div>
-      ${typeof Chores !== 'undefined' ? Chores.navCard(snap) : ''}
-      <div class="accts">${accounts.map(accountCard).join('')}</div>
+      <div class="accts">${accounts.map(a => accountCard(a, snap)).join('')}</div>
       <h3 class="sec-title">最近交易</h3>
       ${ledger.length
         ? `<ul class="txs">${ledger.map(ledgerRow).join('')}</ul>`

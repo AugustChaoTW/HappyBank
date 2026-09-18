@@ -91,6 +91,19 @@ const Chores = (() => {
       sum + (deriveState(c, requests, now).state === 'pending' ? (Number(c.reward) || 0) : 0), 0);
   }
 
+  // 首頁那顆「🧹 每日家事」大按鈕要寫的字。小孩不點進來也要知道今天還有沒有事做，
+  // 所以三種狀態各一句：還能做的優先講（那是他今天還能賺的錢），其次等確認，最後才是做完了。
+  function homeButtonState(chores, requests, now) {
+    const daily = (chores || []).filter(c => c && c.active !== false && (c.repeat || 'daily') !== 'weekly');
+    if (!daily.length) return { state: 'none', count: 0, label: '還沒有家事清單' };
+    const when = now || new Date();
+    const n = availableCount(daily, requests, when, 'daily');
+    if (n > 0) return { state: 'available', count: n, label: `還有 ${n} 件可以做 →` };
+    const waiting = daily.filter(c => deriveState(c, requests, when).state === 'pending').length;
+    if (waiting > 0) return { state: 'pending', count: waiting, label: `⏳ ${waiting} 件等確認` };
+    return { state: 'approved', count: 0, label: '✅ 今天都做完了' };
+  }
+
   // 伺服器錯誤碼 → 小孩看得懂的話（SPEC §7.4）
   function errorMessage(error, message, repeat) {
     const period = repeat === 'weekly' ? '這週' : '今天';
@@ -399,20 +412,19 @@ const Chores = (() => {
     paint();
   }
 
-  // 首頁的入口卡。home.js 只呼叫這一支，順手把最新快照接過來，
+  // 首頁的入口按鈕。貼在「活期帳戶」卡上，因為家事賺的錢就是進那個帳戶——
+  // 位置本身就是因果關係的說明。home.js 只呼叫這一支，順手把最新快照接過來，
   // 進家事頁就不必再等一趟 snapshot 才有畫面。
-  function navCard(snap) {
+  function homeButton(snap) {
     if (snap) snapshot = snap;
-    const chores = (snap && snap.chores) || [];
-    const n = availableCount(chores, (snap && snap.requests) || [], new Date(), 'daily');
-    const badge = n > 0 ? `<span class="nav-badge">${n}</span>` : '';
-    const sub = !chores.length ? '還沒有家事清單' : (n > 0 ? `今天還有 ${n} 件可以做` : '今天的家事都報完了');
+    const st = homeButtonState((snap && snap.chores) || [], (snap && snap.requests) || [], new Date());
     return `
-      <button class="nav-card" id="btn-chores">
-        <span class="nav-icon">🧹</span>
-        <span class="nav-text">家事賺錢${badge}</span>
-        <span class="nav-sub">${esc(sub)}</span>
-        <span class="nav-go">›</span>
+      <button class="big-btn big-btn-${st.state}" id="btn-chores">
+        <span class="big-btn-icon">🧹</span>
+        <span class="big-btn-body">
+          <span class="big-btn-title">每日家事</span>
+          <span class="big-btn-sub">${esc(st.label)}</span>
+        </span>
       </button>`;
   }
 
@@ -479,8 +491,8 @@ const Chores = (() => {
   }
 
   return {
-    render: refresh, open, navCard,
-    // 純函式，給測試與其他頁用
-    deriveState, periodKey, availableCount, pendingReward, errorMessage, friendlyTs
+    render: refresh, open, homeButton,
+    // 純函式，給測試與其他頁用（零用錢頁沿用 periodKey／friendlyTs／title，兩邊的日界線與稱呼才會一致）
+    deriveState, periodKey, availableCount, pendingReward, errorMessage, friendlyTs, homeButtonState, title
   };
 })();

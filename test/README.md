@@ -31,6 +31,7 @@ node --test --watch 'test/**/*.test.js'                     # 邊寫邊跑
 | `accounts.test.js` | 自動開戶不重複（SPEC §2） |
 | `authz.test.js` | 小孩打不到 `admin_*`、看不到別人的帳（SPEC §7.1 / §8） |
 | `chores.test.js` | 家事回報：照片、一天一次、代理確認、`chore_photo`（SPEC §7.2 / §7.5 / §7.6 / §9.5） |
+| `allowance.test.js` | 每日零用錢簽到：三項全勾、照片、一天一次、金額讀 `users.dailyAllowance`、代理確認 |
 | `money.test.js` | `js/money.js` 的顯示算式 |
 
 ## 假的 Apps Script 環境怎麼運作

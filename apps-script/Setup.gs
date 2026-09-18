@@ -8,7 +8,7 @@
 const SCHEMA = {
   // 個資與密碼分開放：credentials 分頁會被隱藏並加保護，
   // 這樣就算把 Sheet 分享給小孩看帳，也碰不到任何人的密碼雜湊。
-  users: ['userId', 'role', 'displayName', 'emoji', 'weeklyAllowance', 'active', 'lastLoginTs'],
+  users: ['userId', 'role', 'displayName', 'emoji', 'dailyAllowance', 'active', 'lastLoginTs'],
   credentials: ['userId', 'salt', 'passwordHash', 'failedCount', 'lockedUntil', 'updatedTs'],
   sessions: ['token', 'userId', 'createdTs', 'expiresTs', 'device'],
   accounts: ['accountId', 'kidId', 'type', 'name', 'emoji', 'rateMonthly',
@@ -19,9 +19,10 @@ const SCHEMA = {
   // 一律「接在最後面」，不照 SPEC 表格的排版插在中間——
   // setup() 只重寫表頭那一列、不搬動資料，插在中間會讓既有列整排錯位
   // （舊的 decidedNote 會突然被讀成 decidedBy）。
+  // checklist 是 M7（每日零用錢簽到）補上的第十七欄，一樣接在最後面。
   requests: ['id', 'ts', 'kidId', 'kind', 'amount', 'choreId', 'fromAccountId',
              'toAccountId', 'note', 'status', 'decidedTs', 'decidedNote', 'clientId',
-             'photoFileId', 'decidedBy', 'decidedProxy'],
+             'photoFileId', 'decidedBy', 'decidedProxy', 'checklist'],
   chores: ['id', 'title', 'icon', 'reward', 'repeat', 'kidId', 'active'],
   config: ['key', 'value', 'note']
 };
@@ -54,7 +55,9 @@ const CONFIG_SEED = [
   ['login_max_fail',      5,     '連續登入失敗幾次鎖定'],
   ['login_lock_minutes',  15,    '鎖定時間（分鐘）'],
   ['pbkdf_rounds',        1000,  '密碼雜湊迭代次數'],
-  ['chore_approver',      'vicky', '家事回報的指定核准者（role=parent 的 userId），其他家長要代理確認']
+  ['chore_approver',      'vicky', '家事回報的指定核准者（role=parent 的 userId），其他家長要代理確認'],
+  ['daily_checklist',     '好好照顧自己|尊重別人的需求|完成自己的工作',
+                                 '每日零用錢簽到的自我檢查項目，用 | 隔開。改這裡就改了，程式不用動']
 ];
 
 function setup() {
@@ -122,7 +125,7 @@ function assertPasswordOk(role, password) {
 
 // 建立或重設一個帳號。在編輯器手動改參數後執行，不要把密碼 commit 進 repo。
 // role: 'kid' | 'parent'
-function upsertUser(userId, role, displayName, emoji, password, weeklyAllowance) {
+function upsertUser(userId, role, displayName, emoji, password, dailyAllowance) {
   assertPasswordOk(role, password);
   userId = String(userId).trim().toLowerCase(); // 帳號一律小寫，登入時大小寫不敏感
   const ss = SpreadsheetApp.openById(SHEET_ID);
@@ -130,7 +133,7 @@ function upsertUser(userId, role, displayName, emoji, password, weeklyAllowance)
   const salt = newSalt();
 
   upsertRow(ss.getSheetByName('users'),
-    [userId, role, displayName, emoji, weeklyAllowance || 0, true, '']);
+    [userId, role, displayName, emoji, dailyAllowance || 0, true, '']);
   upsertRow(ss.getSheetByName('credentials'),
     [userId, salt, hashPassword(password, salt, rounds), 0, '', new Date()]);
 
@@ -157,6 +160,7 @@ function getConfig(key) {
 
 // 一次建好全家帳號。
 // 小孩密碼＝8 位數字，家長密碼＝至少 8 字元。
+// 最後一個參數是每日零用錢（簽到核准後入帳的金額），家長沒有。
 // 執行前把下面的密碼改掉，執行後把密碼清回 CHANGE-ME 再 commit。
 function seedUsers() {
   upsertUser('momo',   'kid',    'Momo', '👧', 'CHANGE-ME', 20);

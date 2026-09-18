@@ -5,11 +5,12 @@
 const { loadGs } = require('./load-gs.js');
 
 // 測試帳號。小孩密碼必須是 8 位數字（SPEC §8.1）。
+// dailyAllowance＝每日零用錢簽到核准後入帳的金額，對齊 seedUsers() 的 20 元。
 const USERS = {
-  momo:  { role: 'kid',    displayName: 'Momo',  emoji: '👧', password: '12345678', weekly: 50 },
-  coco:  { role: 'kid',    displayName: 'Coco',  emoji: '👧', password: '87654321', weekly: 50 },
-  aug:   { role: 'parent', displayName: 'Aug',   emoji: '🧑', password: 'parent-pw-123', weekly: 0 },
-  vicky: { role: 'parent', displayName: 'Vicky', emoji: '👩', password: 'parent-pw-456', weekly: 0 }
+  momo:  { role: 'kid',    displayName: 'Momo',  emoji: '👧', password: '12345678', dailyAllowance: 20 },
+  coco:  { role: 'kid',    displayName: 'Coco',  emoji: '👧', password: '87654321', dailyAllowance: 20 },
+  aug:   { role: 'parent', displayName: 'Aug',   emoji: '🧑', password: 'parent-pw-123', dailyAllowance: 0 },
+  vicky: { role: 'parent', displayName: 'Vicky', emoji: '👩', password: 'parent-pw-456', dailyAllowance: 0 }
 };
 
 // 一間全新的銀行：真的跑過 setup()，真的建過帳號。
@@ -21,7 +22,7 @@ function freshBank(options) {
   who.forEach(id => {
     const u = USERS[id];
     if (!u) throw new Error('seed.js 沒有這個測試帳號：' + id);
-    gs.upsertUser(id, u.role, u.displayName, u.emoji, u.password, u.weekly);
+    gs.upsertUser(id, u.role, u.displayName, u.emoji, u.password, u.dailyAllowance);
   });
   return gs;
 }

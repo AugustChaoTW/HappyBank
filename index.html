@@ -87,6 +87,20 @@
     <input type="file" id="chore-photo-input" accept="image/*" capture="environment" hidden>
   </section>
 
+  <!-- 每日零用錢頁（小孩端：三件事 → 照片 → 送出）-->
+  <section id="view-allowance" class="view hidden">
+    <div class="page-head">
+      <button class="btn-back" id="btn-allowance-back">← 回首頁</button>
+      <h2>🎁 每日零用錢</h2>
+    </div>
+    <p class="msg error hidden" id="allowance-msg"></p>
+    <p class="chores-summary" id="allowance-summary"></p>
+    <div id="allowance-body"></div>
+    <p id="allowance-fresh" class="freshness"></p>
+    <!-- 不自建相機 UI，交給系統 App -->
+    <input type="file" id="allowance-photo-input" accept="image/*" capture="environment" hidden>
+  </section>
+
   <!-- 家長審核頁（SPEC §6 admin、§9.4）-->
   <section id="view-admin" class="view hidden">
     <div class="page-head">
@@ -113,6 +127,7 @@
   <script src="js/money.js"></script>
   <script src="js/photo.js"></script>
   <script src="js/chores.js"></script>
+  <script src="js/allowance.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/home.js"></script>
   <script src="js/login.js"></script>

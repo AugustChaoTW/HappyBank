@@ -425,8 +425,10 @@ function apiSnapshot(p) {
       // 沒有這些，chores 頁畫不出「今天已回報 / 媽媽在 9:14 確認」（SPEC §7.1、§6）
       requests: readTable('requests')
         .filter(r => String(r.kidId) === user.userId)
-        .filter(r => r.status === 'pending' || decidedChoreThisPeriod(r))
+        .filter(r => r.status === 'pending' || decidedChoreThisPeriod(r) || decidedClaimToday(r))
         .map(stripRow),
+      // 今天的三項自我檢查。UI 靠這個畫勾選框，家長改 config 就跟著變。
+      daily_checklist: dailyChecklistItems(),
       chores: readTable('chores')
         .filter(c => isTrue(c.active))
         .filter(c => !c.kidId || String(c.kidId) === user.userId)
@@ -467,6 +469,14 @@ function decidedChoreThisPeriod(r) {
   const repeat = chore ? chore.repeat : 'daily';
   const key = chorePeriodKey(repeat, r.ts);
   return !!key && key === chorePeriodKey(repeat, new Date());
+}
+
+// 這一筆是不是「今天已決定」的簽到（給小孩端畫「媽媽確認了 / 被退回」用）
+function decidedClaimToday(r) {
+  if (String(r.kind) !== 'allowance_claim') return false;
+  if (r.status !== 'approved' && r.status !== 'rejected') return false;
+  const key = chorePeriodKey('daily', r.ts);
+  return !!key && key === chorePeriodKey('daily', new Date());
 }
 
 function accountsOf(kidId) {
@@ -643,6 +653,7 @@ function apiRequest(p) {
   const user = requireSession(p);
   const kind = String(p.kind || '');
   if (kind === 'chore_done') return apiRequestChoreDone(p, user);
+  if (kind === 'allowance_claim') return apiRequestAllowanceClaim(p, user);
   // withdraw / term_break 是 M4 的範圍，還沒實作
   return { ok: false, error: 'unknown-action', message: '還不支援的申請種類：' + kind };
 }
@@ -673,23 +684,9 @@ function apiRequestChoreDone(p, user) {
   }
 
   // 4. 照片必填（SPEC §7.2 第 4 條）
-  const NO_PHOTO = { ok: false, error: 'photo-required', message: '要拍一張照片才能送出喔。' };
-  const mime = String(p.photoMime || 'image/jpeg');
-  if (mime !== 'image/jpeg') return NO_PHOTO;
-  const raw = String(p.photo === undefined || p.photo === null ? '' : p.photo);
-  if (!raw) return NO_PHOTO;
-  let bytes;
-  try {
-    bytes = Utilities.base64Decode(raw);
-  } catch (err) {
-    return NO_PHOTO;   // base64 解不開也算沒照片
-  }
-  if (!bytes || !bytes.length) return NO_PHOTO;
-  if (bytes.length > PHOTO_MAX_BYTES) {
-    return { ok: false, error: 'photo-too-big', message: '照片太大了，請重新壓縮再送一次。' };
-  }
-  // 太小的一律當壞檔（黑畫面／壓縮失敗），跟沒照片一樣請小孩重拍
-  if (bytes.length < PHOTO_MIN_BYTES) return NO_PHOTO;
+  const photo = decodePhoto(p);
+  if (!photo.ok) return photo;
+  const bytes = photo.bytes;
 
   // 5. 一天一次（weekly 則一週一次）。先在鎖外擋掉，省得白傳一張照片。
   if (activeChoreReport(kidId, chore.id, chore.repeat)) {
@@ -727,6 +724,29 @@ function alreadyReportedMessage(chore) {
     : '這件家事今天已經報過了。';
 }
 
+// 照片驗證：家事回報與每日簽到共用同一套（同樣的 mime、同樣的大小上下限）。
+// 成功回 { ok: true, bytes }，失敗回可以直接送回前端的錯誤物件。
+function decodePhoto(p) {
+  const NO_PHOTO = { ok: false, error: 'photo-required', message: '要拍一張照片才能送出喔。' };
+  const mime = String(p.photoMime || 'image/jpeg');
+  if (mime !== 'image/jpeg') return NO_PHOTO;
+  const raw = String(p.photo === undefined || p.photo === null ? '' : p.photo);
+  if (!raw) return NO_PHOTO;
+  let bytes;
+  try {
+    bytes = Utilities.base64Decode(raw);
+  } catch (err) {
+    return NO_PHOTO;   // base64 解不開也算沒照片
+  }
+  if (!bytes || !bytes.length) return NO_PHOTO;
+  if (bytes.length > PHOTO_MAX_BYTES) {
+    return { ok: false, error: 'photo-too-big', message: '照片太大了，請重新壓縮再送一次。' };
+  }
+  // 太小的一律當壞檔（黑畫面／壓縮失敗），跟沒照片一樣請小孩重拍
+  if (bytes.length < PHOTO_MIN_BYTES) return NO_PHOTO;
+  return { ok: true, bytes: bytes };
+}
+
 // 照片進 HappyBank 家事照片/<kidId>/，檔名帶 clientId 前 8 碼，
 // 離線佇列重送時認得出同一張、不會在 Drive 裡留一堆重複檔（SPEC §5、§7.5）。
 // **不呼叫 setSharing**：檔案留在擁有者的 private 資料夾，要看圖走 chore_photo。
@@ -746,6 +766,109 @@ function getOrCreatePath(names) {
     parent = found.hasNext() ? found.next() : parent.createFolder(name);
   });
   return parent;
+}
+
+// ---- request(allowance_claim)：每日零用錢簽到 -------------------------
+// 一天一次，三項（家長設幾項就幾項）全勾 + 一張照片，媽媽確認後入帳。
+
+// 檢查項目來自 config.daily_checklist，用 | 隔開。
+// 家長在 Sheet 上加一項、減一項，伺服器的要求就跟著變，程式不用動。
+function dailyChecklistItems() {
+  return String(getConfigValue('daily_checklist') || '')
+    .split('|')
+    .map(s => String(s).trim())
+    .filter(s => s !== '');
+}
+
+// 勾選驗證：必須「每一項都勾到」。
+// 前端可以送布林陣列（照設定順序），也可以送勾到的項目文字；
+// 兩種都要求「數量剛好、而且涵蓋設定裡的每一項」——少一項、多一項、
+// 重複湊數、夾帶設定裡沒有的項目，一律不算數。
+function checkedAllItems(checks, items) {
+  if (!Array.isArray(checks)) return false;
+  if (checks.length !== items.length) return false;
+  if (checks.every(c => typeof c === 'boolean')) return checks.every(c => c === true);
+  const got = {};
+  checks.forEach(c => { got[String(c).trim()] = true; });
+  return items.every(it => got[it] === true);
+}
+
+// 今天（台北）這個小孩有沒有一筆算數的簽到。
+// rejected / cancelled 不算數——被退回或自己撤回之後可以當天重簽。
+function activeAllowanceClaim(kidId) {
+  const today = chorePeriodKey('daily', new Date());
+  return readTable('requests').filter(r =>
+    String(r.kind) === 'allowance_claim' &&
+    String(r.kidId) === String(kidId) &&
+    (r.status === 'pending' || r.status === 'approved') &&
+    chorePeriodKey('daily', r.ts) === today
+  )[0] || null;
+}
+
+function apiRequestAllowanceClaim(p, user) {
+  // 1. kidId 一律取自 session；簽到是小孩的事
+  if (user.role !== 'kid') throw new Error('AUTH:只有小孩可以簽到領零用錢。');
+  const kidId = String(user.userId);
+
+  const clientId = String(p.clientId || '');
+  if (!clientId) {
+    return { ok: false, error: 'bad-request', message: '缺少 clientId，請重新整理再試一次。' };
+  }
+
+  // 2. 冪等：同一個 clientId 直接回原本那筆
+  const dup = findRequestByClientId(clientId);
+  if (dup) {
+    return { ok: true, duplicate: true, requestId: dup.id, photoFileId: dup.photoFileId || '' };
+  }
+
+  // 3. 三項自我檢查全勾（項數以 config 為準）
+  const items = dailyChecklistItems();
+  if (!items.length) {
+    return { ok: false, error: 'server', message: 'config.daily_checklist 是空的，請家長檢查。' };
+  }
+  // 前端（js/allowance.js）送的欄位叫 checked，離線佇列裡的舊版送 checks，兩個都吃。
+  const ticked = Array.isArray(p.checked) ? p.checked : p.checks;
+  if (!checkedAllItems(ticked, items)) {
+    return {
+      ok: false, error: 'checklist-incomplete',
+      message: '要把 ' + items.length + ' 項都勾起來才能送出喔。'
+    };
+  }
+
+  // 4. 照片必填（與家事回報同一套規則）
+  const photo = decodePhoto(p);
+  if (!photo.ok) return photo;
+
+  // 5. 一天一次。先在鎖外擋掉，省得白傳一張照片。
+  //    「今天」一律是伺服器的台北日曆天——沒有補簽昨天這條路，
+  //    請求裡也沒有任何指定日期的參數。
+  if (activeAllowanceClaim(kidId)) {
+    return { ok: false, error: 'already-claimed', message: '今天已經簽到過了，明天再來。' };
+  }
+
+  // 6. 照片先寫 Drive（鎖外），Sheet 再寫（鎖內）
+  const photoFileId = savePhoto(kidId, 'allowance', clientId, photo.bytes);
+
+  return withLock(() => {
+    const again = findRequestByClientId(clientId);
+    if (again) {
+      return { ok: true, duplicate: true, requestId: again.id, photoFileId: again.photoFileId || '' };
+    }
+    if (activeAllowanceClaim(kidId)) {
+      return { ok: false, error: 'already-claimed', message: '今天已經簽到過了，明天再來。' };
+    }
+    const id = Utilities.getUuid();
+    appendObj('requests', {
+      id: id, ts: new Date(), kidId: kidId, kind: 'allowance_claim',
+      amount: '',                       // 金額不採信前端，核准時才讀 users.dailyAllowance
+      choreId: '', fromAccountId: '', toAccountId: '',
+      note: String(p.note || ''), status: 'pending',
+      decidedTs: '', decidedNote: '', decidedBy: '', decidedProxy: '',
+      photoFileId: photoFileId, clientId: clientId,
+      checklist: items.join('|')
+    });
+    return { ok: true, requestId: id, photoFileId: photoFileId };
+  });
 }
 
 // ---- cancel_request ---------------------------------------------------
@@ -781,6 +904,11 @@ function choreApprover() {
   return u;
 }
 
+// 家事回報與每日簽到共用同一套核准者規則（指定核准者 + 代理）。
+function needsChoreApprover(kind) {
+  return String(kind) === 'chore_done' || String(kind) === 'allowance_claim';
+}
+
 function apiAdminDecide(p) {
   const parent = requireParent(p);          // 小孩一律 unauthorized（SPEC §7.4）
   const decision = String(p.decision || '');
@@ -802,7 +930,7 @@ function apiAdminDecide(p) {
   // 家事多一層：指定核准者，其他家長要明確代理（SPEC §7.2、§9.5 三）
   let proxy = false;
   let approver = null;
-  if (req.kind === 'chore_done') {
+  if (needsChoreApprover(req.kind)) {
     approver = choreApprover();
     if (!approver) {
       return { ok: false, error: 'server', message: 'config.chore_approver 設定錯誤，請家長檢查。' };
@@ -832,13 +960,15 @@ function apiAdminDecide(p) {
       return { ok: true, requestId: fresh.id, status: 'rejected' };
     }
 
-    if (fresh.kind !== 'chore_done') {
+    if (fresh.kind !== 'chore_done' && fresh.kind !== 'allowance_claim') {
       return { ok: false, error: 'unknown-action', message: '這種申請的核准還沒實作。' };
     }
 
     // 先入帳再改狀態（同一把鎖內）：反過來的話，ledger 失敗會留下
     // 「已核准但沒拿到錢」的 request，而那是小孩會吵架的方向。
-    const posted = creditChore(fresh, parent, approver, proxy);
+    const posted = fresh.kind === 'allowance_claim'
+      ? creditAllowance(fresh, parent, approver, proxy)
+      : creditChore(fresh, parent, approver, proxy);
     if (!posted.ok) return posted;
 
     patchRow('requests', fresh._row, {
@@ -874,6 +1004,41 @@ function creditChore(req, parent, approver, proxy) {
     accountId: acc.accountId, type: 'chore', amount: amount, memo: memo,
     by: parent.userId, refId: req.id,
     // 一筆 request 只入得了一次帳，就算兩個家長搶著按也一樣（SPEC §7.3）
+    clientId: 'req:' + req.id
+  });
+  if (res.ok) res.amount = amount;
+  return res;
+}
+
+// 每日零用錢：金額一律伺服器讀這個小孩自己的 users.dailyAllowance，
+// 前端送的 amount 一概不看；一律進活期主帳戶。
+// 「算哪一天」看的是 req.ts（送出時間），不是現在——媽媽三天後才按確認，
+// 付的還是那天的零用錢。
+function creditAllowance(req, parent, approver, proxy) {
+  const kid = findBy('users', 'userId', String(req.kidId));
+  if (!kid || kid.role !== 'kid') {
+    return { ok: false, error: 'no-kid', message: '找不到這個小孩，無法入帳。' };
+  }
+  const amount = Math.round(num(kid.dailyAllowance, 0));
+  if (!amount) {
+    return { ok: false, error: 'zero-amount', message: '這個小孩的每日零用錢是 0，請先去設定。' };
+  }
+
+  ensureDefaultAccounts(req.kidId);
+  const acc = readTable('accounts').filter(a =>
+    String(a.kidId) === String(req.kidId) && a.type === 'current' && a.status === 'active')[0];
+  if (!acc) return { ok: false, error: 'no-account', message: '找不到活期主帳戶。' };
+
+  const when = Utilities.formatDate(new Date(req.ts), 'Asia/Taipei', 'M/d');
+  let memo = '每日零用錢（' + when + '）';
+  if (proxy && approver) {
+    memo += ' · ' + parent.displayName + ' 代替 ' + approver.displayName + ' 確認';
+  }
+
+  const res = postLedger({
+    accountId: acc.accountId, type: 'allowance', amount: amount, memo: memo,
+    by: parent.userId, refId: req.id,
+    // 一筆簽到只入得了一次帳，就算兩個家長搶著按也一樣（SPEC §7.3）
     clientId: 'req:' + req.id
   });
   if (res.ok) res.amount = amount;

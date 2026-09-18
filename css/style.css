@@ -231,6 +231,57 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   font-size: .85rem; font-weight: 800; text-align: center;
 }
 
+/* --- 活期卡上的兩顆大按鈕：🎁 每日零用錢 / 🧹 每日家事 ---------------- */
+/* 小孩用大拇指按，整顆按鈕至少 64px 高；字要大到不必湊近看。
+   狀態直接寫在副標上，不點進去也知道今天領了沒、家事還剩幾件。 */
+.acct-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+
+.big-btn {
+  width: 100%; min-height: 72px; padding: 14px 16px;
+  display: flex; align-items: center; gap: 14px; text-align: left;
+  font-family: inherit; color: var(--c-text); cursor: pointer;
+  background: #f4faf6; border: 2px solid #dcebe1; border-radius: 18px;
+  transition: transform .08s ease;
+}
+.big-btn:active { transform: scale(.98); }
+.big-btn-icon { font-size: 2.1rem; line-height: 1; flex: none; }
+.big-btn-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.big-btn-title { font-size: 1.2rem; font-weight: 800; }
+.big-btn-sub { font-size: .95rem; font-weight: 700; color: var(--c-brand-dark); }
+
+/* 還沒做的事要顯眼，等確認的是黃的，做完的退成灰的——顏色跟家事卡的四種狀態一致 */
+.big-btn-available { border-color: var(--c-brand); }
+.big-btn-pending { background: #fff8e9; border-color: var(--c-gold); }
+.big-btn-pending .big-btn-sub { color: #9a6c00; }
+.big-btn-rejected { background: #fdecec; border-color: var(--c-danger); }
+.big-btn-rejected .big-btn-sub { color: #8f2a2a; }
+.big-btn-approved, .big-btn-none { background: #f3f6f4; border-color: #e4ebe6; }
+.big-btn-approved .big-btn-sub, .big-btn-none .big-btn-sub { color: var(--c-muted); }
+
+/* --- 每日零用錢：三項勾選 --- */
+/* 原生 checkbox 對小孩的手指太小，整列都做成可按的按鈕 */
+.ticks { display: flex; flex-direction: column; gap: 10px; }
+.tick {
+  width: 100%; min-height: 64px; padding: 12px 16px;
+  display: flex; align-items: center; gap: 14px; text-align: left;
+  font-family: inherit; font-size: 1.15rem; font-weight: 700; color: var(--c-text);
+  background: var(--c-card); border: 2px solid #e4ebe6; border-radius: 18px;
+  box-shadow: var(--shadow); cursor: pointer; transition: transform .08s ease;
+}
+.tick:active { transform: scale(.98); }
+.tick-box {
+  width: 36px; height: 36px; flex: none; border-radius: 12px;
+  border: 3px solid #d8e2db; background: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem; font-weight: 800; color: #fff;
+}
+.tick.on { background: #eaf6ee; border-color: var(--c-brand); }
+.tick.on .tick-box { background: var(--c-brand); border-color: var(--c-brand); }
+.tick-text { flex: 1; }
+.tick-hint { text-align: center; font-size: .95rem; font-weight: 700; color: var(--c-muted); margin: 14px 0 0; }
+.tick-hint.ok { color: var(--c-brand-dark); }
+#view-allowance .btn-primary { min-height: 64px; font-size: 1.15rem; }
+
 /* --- 家事卡片 --- */
 .chores-summary {
   text-align: center; font-size: .95rem; font-weight: 700; color: var(--c-brand-dark);
