@@ -21,6 +21,18 @@ const SCHEMA = {
   config: ['key', 'value', 'note']
 };
 
+// 家事清單初版。kidId 空白 = 誰都可以接。
+// 定價原則：一件 5~20 元，對照每週 50 元零用錢——做三件 ≈ 半週零用錢，
+// 讓「勞動」與「等零用錢」的比重有感但不失衡。之後在 admin 頁隨時可改。
+const CHORES_SEED = [
+  ['chore-trash',   '倒垃圾',         '🗑️', 10, 'daily',  '', true],
+  ['chore-dishes',  '收碗盤',         '🍽️', 10, 'daily',  '', true],
+  ['chore-pets',    '餵魚／澆花',     '🐟',  5, 'daily',  '', true],
+  ['chore-sweep',   '掃地',           '🧹', 15, 'weekly', '', true],
+  ['chore-laundry', '摺自己的衣服',   '👕', 15, 'weekly', '', true],
+  ['chore-room',    '整理自己的房間', '🛏️', 20, 'weekly', '', true]
+];
+
 const CONFIG_SEED = [
   ['rate_current',        0.05,  '活期主帳戶月利率'],
   ['rate_term',           0.10,  '定存月利率'],
@@ -49,16 +61,9 @@ function setup() {
     sh.setFrozenRows(1);
   });
 
-  // config 種子（只補不存在的 key）
-  const cfg = ss.getSheetByName('config');
-  const existing = cfg.getLastRow() > 1
-    ? cfg.getRange(2, 1, cfg.getLastRow() - 1, 1).getValues().map(r => String(r[0]))
-    : [];
-  const toAdd = CONFIG_SEED.filter(row => existing.indexOf(row[0]) === -1);
-  if (toAdd.length) {
-    cfg.getRange(cfg.getLastRow() + 1, 1, toAdd.length, 3).setValues(toAdd);
-  }
+  seedTable(ss.getSheetByName('config'), CONFIG_SEED);
 
+  seedTable(ss.getSheetByName('chores'), CHORES_SEED);
   protectCredentials(ss);
 
   // 移掉預設空白分頁
@@ -77,6 +82,17 @@ function protectCredentials(ss) {
   p.setDescription('密碼雜湊，請勿手動編輯');
   p.removeEditors(p.getEditors());
   if (p.canDomainEdit()) p.setDomainEdit(false);
+}
+
+// 以第一欄為鍵補種子資料：已存在的鍵一律不動，避免覆蓋家長改過的內容
+function seedTable(sh, seed) {
+  const existing = sh.getLastRow() > 1
+    ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().map(r => String(r[0]))
+    : [];
+  const toAdd = seed.filter(row => existing.indexOf(String(row[0])) === -1);
+  if (toAdd.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, toAdd.length, toAdd[0].length).setValues(toAdd);
+  }
 }
 
 // --- 密碼 ---------------------------------------------------------------
