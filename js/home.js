@@ -68,7 +68,7 @@ const Home = (() => {
   // --- 各種帳戶卡下面那一行：這是整個 app 想講的話 ---
   function accountHint(a) {
     if (a.type === 'current') return '<span class="hint">隨時可以用</span>';
-    if (a.type === 'gift') return '<span class="hint nudge">這裡的錢不會長大，搬去活期才會 →</span>';
+    if (a.type === 'gift') return '<span class="hint">這是媽媽幫你保管的錢</span>';
     if (a.type === 'term') {
       if (a.status === 'matured') return '<span class="hint alert">🔔 已到期，記得領回活期</span>';
       const days = Money.daysUntil(a.lockUntil);
@@ -183,7 +183,9 @@ const Home = (() => {
     // 先畫快取，讓小孩一開 app 就看得到數字，網路回來再覆蓋
     const key = cacheKey(u);
     const cached = loadCache(key);
-    if (cached) { showBanner(''); paint(cached, '離線快取'); }
+    // 還在等網路不等於離線。標成「離線快取」會讓線上的人以為斷線了，
+    // 而 Apps Script 要 2~4 秒，這個誤導的標籤會停留很久。
+    if (cached) { showBanner(''); paint(cached, '更新中…'); }
 
     let res;
     try {

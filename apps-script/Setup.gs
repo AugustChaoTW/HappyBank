@@ -159,9 +159,9 @@ function getConfig(key) {
 // 小孩密碼＝8 位數字，家長密碼＝至少 8 字元。
 // 執行前把下面的密碼改掉，執行後把密碼清回 CHANGE-ME 再 commit。
 function seedUsers() {
-  upsertUser('momo',   'kid',    'Momo', '👧', 'CHANGE-ME', 50);
-  upsertUser('coco',   'kid',    'Coco', '👧', 'CHANGE-ME', 50);
-  upsertUser('dodo',   'kid',    'Dodo', '👦', 'CHANGE-ME', 50);
+  upsertUser('momo',   'kid',    'Momo', '👧', 'CHANGE-ME', 20);
+  upsertUser('coco',   'kid',    'Coco', '👧', 'CHANGE-ME', 15);
+  upsertUser('dodo',   'kid',    'Dodo', '👦', 'CHANGE-ME', 10);
   upsertUser('aug',    'parent', 'Aug',   '🧑', 'CHANGE-ME', 0);
   upsertUser('vicky',  'parent', 'Vicky', '👩', 'CHANGE-ME', 0);
 }
