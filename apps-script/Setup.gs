@@ -26,7 +26,8 @@ const CONFIG_SEED = [
   ['rate_gift',           0.00,  '阿公阿嬤紅包帳戶月利率'],
   ['allowance_weekday',   0,     '每週零用錢發放日（0=週日）'],
   ['term_months_options', '1,3,6', '定存可選期數（月）'],
-  ['approval_mode',       'TBD', '審核模式，見 SPEC §9.1，尚未拍板'],
+  ['approval_mode',       'tiered', '審核模式：分級（見 SPEC §9）'],
+  ['kid_password_digits', 8,     '小孩密碼位數，固定數字'],
   ['session_days_kid',    30,    '小孩登入有效天數'],
   ['session_hours_parent', 24,   '家長登入有效小時數'],
   ['login_max_fail',      5,     '連續登入失敗幾次鎖定'],
@@ -80,9 +81,24 @@ function newSalt() {
   return Utilities.getUuid().replace(/-/g, '').slice(0, 16);
 }
 
+// 密碼格式檢查：小孩固定 N 位數字，家長至少 8 字元
+function assertPasswordOk(role, password) {
+  const pw = String(password);
+  if (role === 'kid') {
+    const n = Number(getConfig('kid_password_digits')) || 8;
+    if (!new RegExp('^\\d{' + n + '}$').test(pw)) {
+      throw new Error('小孩密碼必須是 ' + n + ' 位數字');
+    }
+  } else if (pw.length < 8) {
+    throw new Error('家長密碼至少 8 個字元');
+  }
+  if (pw === 'CHANGE-ME') throw new Error('請先改掉預設密碼');
+}
+
 // 建立或重設一個帳號。在編輯器手動改參數後執行，不要把密碼 commit 進 repo。
 // role: 'kid' | 'parent'
 function upsertUser(userId, role, displayName, emoji, password, weeklyAllowance) {
+  assertPasswordOk(role, password);
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sh = ss.getSheetByName('users');
   const rounds = Number(getConfig('pbkdf_rounds')) || 1000;
@@ -110,7 +126,9 @@ function getConfig(key) {
   return null;
 }
 
-// 一次建好全家帳號。密碼請在執行前改掉，執行完把這個函式的密碼清空。
+// 一次建好全家帳號。
+// 小孩密碼＝8 位數字，家長密碼＝至少 8 字元。
+// 執行前把下面的密碼改掉，執行後把密碼清回 CHANGE-ME 再 commit。
 function seedUsers() {
   upsertUser('momo',   'kid',    'Momo', '👧', 'CHANGE-ME', 50);
   upsertUser('coco',   'kid',    'Coco', '👧', 'CHANGE-ME', 50);
