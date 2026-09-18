@@ -68,15 +68,15 @@
 
 ### 資金流向規則
 
-- **所有收入一律先進 `current`**：每週零用錢、家事獎金、利息（完整清單見下方「活期的錢怎麼變多」）。
+- **所有收入一律先進 `current`**：每日零用錢、家事獎金、利息（完整清單見下方「活期的錢怎麼變多」）。
 - 子帳戶只能從 `current` 轉入，也只能轉回 `current`。子帳戶之間不能直接轉。
 - **紅包直接進 `gift`，而且只能從 `gift` 領現金出去。**
   `gift` 不能轉去任何帳戶，任何帳戶也不能轉進 `gift`（見上表的說明與 §7.2）。
 - 真實現金提領一律從 `current` 或 `gift` 出去，兩者都要核准（§9.2）。
 
 ```
-      家事 ──┐
-    零用錢 ──┼──▶ 💰 current (5%) ◀──▶ 🔒 term (10%)  到期前鎖死
+      家事 ──┐   （兩條都要拍照 ＋ 媽媽確認）
+  每日簽到 ──┼──▶ 💰 current (5%) ◀──▶ 🔒 term (10%)  到期前鎖死
       利息 ──┘          │            ◀──▶ 🎯 goal (5%)  達標前鎖死
                         │              （→ 存入本金；← 轉回本金＋利息）
             提領現金 ◀──┘
@@ -92,7 +92,7 @@
 
 | # | 來源 | 誰觸發 | 怎麼發生 | ledger `type` |
 |---|---|---|---|---|
-| 1 | **每週零用錢** | 系統自動 | 爸媽給的固定金額，**逐個小孩設定**（目前三人都是 20），存在 `users.weeklyAllowance`（§5）。**每週日早上 8:00** 由 time-driven trigger 自動入帳（§4.5、§11 M3），人不能插手（§9.2） | `allowance` |
+| 1 | **每日零用錢** | 小孩每天簽到 → 家長確認 | **不是自動發的，每天要走一次流程才領得到**：小孩在 app 裡勾完三個自我檢核項目（`config.daily_checklist`）、拍一張照片、送出，經 `chore_approver`（預設 Vicky，或代理）確認後入帳。**金額由伺服器查 `users.dailyAllowance`**（逐人設定，目前三人都是 20，§5），前端送的數字不採用。**當天沒送出就沒了，不能補領昨天的**（§9.6） | `allowance` |
 | 2 | **家事獎金** | 小孩回報 → 家長確認 | 回報家事**＋照片**，經 `chore_approver`（預設 Vicky，或代理）確認後入帳；**金額由伺服器查 `chores.reward`**，前端改金額沒用（§9.5） | `chore` |
 | 3 | **從定存或目標子帳戶轉回活期** | 小孩自己 | 到期、提前解約、或目標達標後，把**本金加上已累積的利息**轉回活期。免審，按下去就成立（§9.2）。解約的話利息已先被回沖（§4.3） | `transfer_in` |
 | 4 | **利息** | 系統自動 | 活期本身**月息 5% 複利**，**每月 1 日 00:30** 結算（§4.1） | `interest` |
@@ -166,10 +166,35 @@ Apps Script time-driven trigger，**每月 1 日 00:30（Asia/Taipei）**結算�
 ### 4.5 通膨警告（給家長）
 
 月息 5% 複利 = 年化約 1.8 倍；定存月息 10% = 年化約 3.1 倍。錢會膨脹得比直覺快。
-建議家長把**每週零用錢金額設低一點**，讓利息真的成為主要成長來源——這正是我們想教的東西。
-利率在 `config` 分頁可調（整家一起）；**每週零用錢則是逐個小孩設定**，
-存在 `users.weeklyAllowance`（見 §5），可以依年齡給不同金額，沒有全家共用的單一數字
+利率在 `config` 分頁可調（整家一起）；**每日零用錢則是逐個小孩設定**，
+存在 `users.dailyAllowance`（見 §5），可以依年齡給不同金額，沒有全家共用的單一數字
 （目前三人剛好一律 20，但那是三筆各自獨立的資料，不是一個共用設定）。
+
+#### 改成每日 20 元之後的實際數字 ✅ 已定案（2026-09-18）
+
+原本的設計是「每週日自動發 20 元」。**現在改成每天走一次簽到流程才領得到 20 元**（§9.6），
+金額沒變、頻率變成七倍。這件事對家裡的現金流不是小數目，下面把它算清楚：
+
+| 項目 | 舊設計（每週 20，自動發） | 新設計（每日 20，要簽到） |
+|---|---|---|
+| 一人一年零用錢 | 1,040 元 | **7,300 元**（365 天全勤上限） |
+| 三個小孩一年 | 3,120 元 | **21,900 元** |
+| 一人一年利息（全存活期不花） | 404 元 | **2,855 元** |
+| 一人一年後活期餘額 | 1,444 元 | **10,155 元** |
+| 第一次結息（滿一個月時） | +4 元 | **+31 元** |
+
+> 計算方式：從 1 月 1 日起每天入帳 20 元，每月 1 日 00:30 以**結算當下餘額**計息
+> （§4.1、§4.2），`Math.round` 不足 1 元記 0（§3），連續 12 次結息。
+> 三人金額相同，所以三條線一模一樣；三人一年後活期合計 **30,465 元**。
+> 7,300 是**全勤上限**——漏簽一天就少 20 元，實際會低於這個數。
+
+> 💰 **這是已經決定的預算，不再討論。** 家庭真實現金支出從一年 3,120 元變成
+> **21,900 元**（多 18,780 元），是七倍。使用者的判斷是「不用管錢的問題，因為小孩會領出來花掉」——
+> 錢不會一直躺在活期滾，上面那個 10,155 元是「完全不花」的理論上限，不是真的要準備的數字。
+> 這裡把數字寫下來只是為了誠實，**不是要重開這個決定**。
+>
+> 順帶一提，這個改動**順手解掉了 §10 的冷啟動問題**：第一次結息從 +4 元變成 **+31 元**，
+> 本金一個月就站上 620 元，§2 的「活期 5% vs 定存 10%」那堂課終於演得出來。
 
 ---
 
@@ -190,36 +215,39 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 | role | enum | `kid` / `parent` |
 | displayName | string | 顯示名 |
 | emoji | string | 👧 |
-| weeklyAllowance | int | **每週零用錢金額，逐人設定**（parent 為 0）。這是每個小孩的固定參數，不在 `config`，改某個小孩不影響其他人 |
+| dailyAllowance | int | **每日零用錢金額，逐人設定**（parent 為 0）。這是每個小孩的固定參數，不在 `config`，改某個小孩不影響其他人。**欄位原名 `weeklyAllowance`，2026-09-18 原位改名**——位置沒動（第 5 欄），既有資料不會錯位 |
 | active | bool | 停用後無法登入 |
 | lastLoginTs | datetime | |
 
-#### 每週零用錢金額 ✅ 已定案（2026-09-18，當日修訂）
+#### 每日零用錢金額 ✅ 已定案（2026-09-18，當日修訂）
 
-| 小孩 | 每週零用錢 |
+| 小孩 | 每日零用錢 |
 |---|---|
 | Momo | **20** |
 | Coco | **20** |
 | Dodo | **20** |
 
-> 三個小孩**一律 20**。這個數字**取代同日稍早暫定的 Momo 20 / Coco 15 / Dodo 10**，
-> 而那組數字本身又取代更早的全家一律 50。理由見 §4.5：金額壓低，
-> 利息才會成為「錢變多」的主要感覺來源；而且不分年齡給同一個數字，家裡比較不會吵。
+> 三個小孩**一律每天 20**。數字沒變，**變的是頻率與取得方式**：
+> 從「每週日自動發 20」改成「**每天走一次簽到流程才領得到 20**」（規則全文見 §9.6，
+> 預算試算見 §4.5）。20 這個數字本身**取代同日稍早暫定的 Momo 20 / Coco 15 / Dodo 10**，
+> 而那組數字又取代更早的全家一律 50；不分年齡給同一個數字，家裡比較不會吵。
 >
-> ⚠️ **欄位仍然是逐人設定的**：`weeklyAllowance` 存在每一列 `users` 上，
+> ⚠️ **欄位仍然是逐人設定的**：`dailyAllowance` 存在每一列 `users` 上，
 > 三個人**今天剛好相等**，不代表它變成全家共用的單一設定。
-> schema（上表）與 §11 M3 的每週 trigger 都是**逐個小孩**讀自己那一列的金額，
+> 核准入帳時伺服器是**逐個小孩**讀自己那一列的金額（§9.6），
 > 隨時可以只改其中一個人，不影響另外兩個。
 >
-> **這些值是資料，不是程式碼**：存在 `users.weeklyAllowance` 欄位，
+> **這些值是資料，不是程式碼**：存在 `users.dailyAllowance` 欄位，
 > 直接在 Sheet 的 `users` 分頁改即可（`Setup.gs` 的 `upsertUser()` helper 也寫得動，
 > 但它會**連帶重設該帳號的密碼**，所以只有「金額和密碼一起換」時才用它）。
 > 改完即時生效，不需要重新部署。家長端 admin 也改得動（§6）。
 >
-> ✅ `apps-script/Setup.gs` 的 `seedUsers()` 已同步改成三人都是 `20`，
-> 和本節一致，沒有分歧。但它只影響「第一次建帳號」。
+> ⚠️ **欄位改名要在 `SCHEMA` 原位改**：`users` 的第 5 欄由 `weeklyAllowance` 改叫
+> `dailyAllowance`，**位置不動**。`setup()` 只重寫表頭那一列、不搬動資料，
+> 所以原位改名不會讓既有三列錯位；把它刪掉再接到最後面則會。
 >
-> ⚠️ **線上的 Sheet 目前三個人都還是 50**，必須**手動在 `users` 分頁把那一欄改成 20**。
+> ⚠️ **線上 Sheet 的那三格現在的值是舊的（每週制的殘留），必須手動改成 20。**
+> 以前的紀錄說是 50；不論現在顯示什麼，都要**親自打開 `users` 分頁確認並改成 20**。
 > **不要為了改金額重跑 `seedUsers()`**——`upsertUser()` 會重新產生 salt 與密碼雜湊，
 > 等於把大家的密碼洗回 `CHANGE-ME`。
 
@@ -288,7 +316,7 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 | clientId | string\|null | **冪等鍵**，見 §7.3 |
 
 `type` 列舉：
-`allowance`（每週零用錢）· `chore`（家事獎金）· `interest`（利息）· `interest_reversal`（解約回沖）·
+`allowance`（每日零用錢，走每日簽到核准後入帳，§9.6）· `chore`（家事獎金）· `interest`（利息）· `interest_reversal`（解約回沖）·
 `gift_in`（紅包）· `withdraw`（領現金）· `transfer_in` / `transfer_out`（帳戶間轉帳，成對）·
 `penalty`（罰款）· `adjust`（家長手動調整）
 
@@ -298,9 +326,9 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 | id | string | uuid |
 | ts | datetime | |
 | kidId | string | |
-| kind | enum | `chore_done` / `withdraw` / `term_break`（見 §9.2；轉帳免審，不進本表） |
+| kind | enum | `chore_done` / **`allowance_claim`** / `withdraw` / `term_break`（見 §9.2；轉帳免審，不進本表） |
 | amount | int\|null | |
-| choreId | string\|null | |
+| choreId | string\|null | `kind = allowance_claim` 時固定為空（每日簽到不對應任何一件家事） |
 | fromAccountId / toAccountId | string\|null | |
 | note | string | 小孩自己打的理由 |
 | status | enum | `pending` / `approved` / `rejected` / `cancelled` |
@@ -308,8 +336,16 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 | decidedBy | string\|null | **實際按下核准／退回的人的 userId**。原本只記時間不記人，代理確認就查不出是誰決定的（見 §9.5） |
 | decidedProxy | bool | 是否為代理確認（核准者不是 `config.chore_approver`）。**寫入當下就記死，不要事後用 `decidedBy !== config.chore_approver` 推導**——`chore_approver` 一旦改過，歷史紀錄就會說謊 |
 | decidedNote | string | 家長回覆（退回時必填，讓小孩知道為什麼） |
-| photoFileId | string\|null | 家事照片在 Google Drive 的 **檔案 ID**（不是網址，見下方「家事照片」）。`kind = chore_done` **必填**；照片二進位內容不進 Sheet。要看圖一律走 `GET ?action=chore_photo`（§7.6） |
+| photoFileId | string\|null | 照片在 Google Drive 的 **檔案 ID**（不是網址，見下方「家事照片」）。`kind = chore_done` 與 `kind = allowance_claim` **皆必填**；照片二進位內容不進 Sheet。要看圖一律走 `GET ?action=chore_photo`（§7.6） |
 | clientId | string | 冪等鍵 |
+| checklist | string\|null | **`kind = allowance_claim` 專用**，記錄當天勾了什麼。格式：`項目1=1\|項目2=1\|項目3=1`，用 `\|` 分隔、與 `config.daily_checklist` **同一個順序**，值只有 `1`（伺服器只收全勾，見 §7.2）。存**當下的項目文字**而不是索引，這樣家長事後增刪項目也查得回「那天勾的是哪三件事」。其他 kind 留空 |
+
+> ⚠️ **上表是「有哪些欄位」，不是 Sheet 的欄位順序。**
+> `Setup.gs` 的 `SCHEMA.requests` 才是順序的唯一定義，而且新欄位**一律接在最後面**：
+> 現有順序是 `… decidedNote, clientId, photoFileId, decidedBy, decidedProxy`，
+> **`checklist` 要接在 `decidedProxy` 之後**，成為最後一欄。
+> 理由是 `setup()` 只重寫表頭那一列、不搬動任何資料——把新欄位插在中間，
+> 既有的每一列都會默默錯位一格（舊的 `clientId` 會突然被讀成 `checklist`）。
 
 ### `chores`
 | 欄位 | 型別 | 說明 |
@@ -325,14 +361,37 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 ### `config`（key-value 單列表）
 `rate_current` · `rate_term` · `rate_goal` · `rate_gift` ·
 `term_months_min`（3）· `term_months_max`（12）·
-`allowance_weekday`（0-6，固定 0＝週日）· `allowance_hour`（8，24 小時制）·
+`daily_checklist`（見下）·
 `session_days_kid` · `session_hours_parent` · `login_max_fail` · `login_lock_minutes` · `pbkdf_rounds` ·
 `approval_mode`（固定 `tiered`，見 §9）· `kid_password_digits`（8）·
 `chore_approver`（預設 `vicky`）
 
-> 這裡**沒有**每週零用錢金額（在 `users.weeklyAllowance`，逐人設定），
+> 這裡**沒有**每日零用錢金額（在 `users.dailyAllowance`，逐人設定），
 > 也**沒有**定存期數的固定選項——期數是開戶時自由填的，只受 `term_months_min` /
 > `term_months_max` 上下限約束，由伺服器端 `open_account` 把關（見 §4.3、§9.3）。
+>
+> ❌ **`allowance_weekday` 與 `allowance_hour` 已移除。** 每週日早上 8:00 自動發零用錢的
+> time-driven trigger 不存在了（§9.6）。`CONFIG_SEED` 裡那兩列一併刪掉；
+> 線上 `config` 分頁若已經有這兩列，留著不會有人讀，但建議手動刪掉免得誤導。
+
+#### `daily_checklist`：每日簽到的三個自我檢核項目
+
+預設值（用 `|` 分隔，**不含空白**）：
+
+```
+好好照顧自己|尊重別人的需求|完成自己的工作
+```
+
+- **項目存在 `config`，不寫死在程式裡。** 伺服器端的驗證規則是
+  「**送來的勾選數量等於設定的項目數，而且每一項都為真**」（§7.2），
+  **不是**「等於 3」。所以家長之後想加第四項、或砍到兩項，
+  改這一格就好，前後端都不用改程式、不用重新部署。
+- 分隔字元固定 `|`；項目文字本身不得含 `|`（伺服器 split 後對每段 `trim()`，空段捨棄）。
+- 讀出來若是空字串或 split 後一項都不剩，視為**設定錯誤**：
+  `request(kind='allowance_claim')` 一律回 `ok:false, error:'server'`，
+  **不要靜默 fallback 成「不用勾也能領」**（同 `chore_approver` 的處理方式）。
+- 改項目**不影響已經送出的紀錄**：`requests.checklist` 存的是當下的項目文字（見上表），
+  歷史紀錄不會因為家長改設定而說謊。
 
 `chore_approver` 是**家事回報的指定核准者**，值是一個 `role = parent` 的 userId，預設 `vicky`。
 另一位家長仍然可以核准，但必須走「代理確認」（見 §9.5）。把它放進 `config` 是為了
@@ -342,14 +401,25 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 
 ### 家事照片（Google Drive，不進 Sheet）
 
+> 📸 **每日簽到的照片走完全同一條路。** 下面每一條規則對 `kind = chore_done` 與
+> `kind = allowance_claim` 一體適用——同一個資料夾、同一個檔名規則、同樣不 `setSharing`、
+> 同樣只能經 `chore_photo`（§7.6）取圖。
+> **資料夾名稱維持「HappyBank 家事照片」不改**，免得既有檔案要搬家；
+> 名字有點窄，但那是可以接受的小瑕疵。
+> 每日簽到的照片在檔名裡以 **`allowance`** 佔掉 `<choreId>` 的位置，
+> 例如 `20260918-allowance-1a2b3c4d.jpg`，一眼分得出是哪一種。
+
 照片是資料模型的一部分，只是不存在 Sheet 裡。作法沿用 penghu-explorer 的
 「手機照片 → base64 → Apps Script → Drive」那條路（同樣的手法，不是同一份程式碼——兩個 repo 刻意不共用）。
 
 - **位置**：Apps Script 以 `DriveApp` 在擁有者雲端硬碟根目錄下建
   `HappyBank 家事照片/<kidId>/`，資料夾不存在就建（`getOrCreatePath`，可重複執行）。
 - **檔名**：`<yyyyMMdd>-<choreId>-<clientId 前 8 碼>.jpg`
-  （日期取 `Asia/Taipei`）。帶 `clientId` 是為了離線佇列重送時**認得出同一張照片**，
+  （日期取 `Asia/Taipei`；每日簽到的 `<choreId>` 固定寫 `allowance`）。
+  帶 `clientId` 是為了離線佇列重送時**認得出同一張照片**，
   不會在 Drive 裡留下一堆重複檔（見 §7.5）。
+  實作上沿用既有的 `savePhoto(kidId, choreId, clientId, bytes)`，
+  每日簽到就是把第二個參數傳 `'allowance'`，**不要另外寫一支**。
 - **格式**：一律 JPEG。前端上傳前必須先壓縮（最長邊 ~1280px、品質 0.8，見 §7.5），
   伺服器不做影像處理。
 - **權限：不做任何分享。** 建完檔就放著，維持 Drive 預設權限——
@@ -362,6 +432,7 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
   存 URL 也沒用——檔案是 private，沒登入 Google 帳號的瀏覽器點開只會看到權限牆。
   要看圖一律經過伺服器驗身分後代理取圖（§7.6）。
 - **一張照片對一筆 request**：`photoFileId` 是一對一，不做相簿、不支援補傳第二張。
+  每日簽到也是**一天一張**，不是「一個項目一張」。
 
 > **還留著的三件事（不是風險警告，是誠實的現況）：**
 > 照片**永久留在 Drive**，v1 沒有自動刪除；
@@ -374,7 +445,7 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 ## 6. 前端結構
 
 ```
-index.html              views: login / home / account / chores / goal / history / admin
+index.html              views: login / home / daily / account / chores / goal / history / admin
 css/style.css           沿用 penghu-explorer 的視覺語彙（大字、大按鈕、手機直式）
 js/
   config.js             apiUrl, apiToken, 預設利率（僅供離線顯示，以伺服器為準）
@@ -385,16 +456,20 @@ js/
   store.js              localStorage 快照 + 資料新鮮度（「更新於 ○○」）
   money.js              金額格式化、利息試算、「還要幾週」估算
   account.js            餘額頁、帳戶卡片、轉帳
+  daily.js              每日簽到：三個勾選項目、拍照、送出、當天狀態（§9.6）
+  photo.js              拍照＋canvas 壓縮＋照片縮圖延遲載入與記憶體快取，
+                        chores.js 與 daily.js 共用（§7.5、§7.6）
   chores.js             家事清單、回報、拍照與壓縮（canvas → JPEG base64，見 §7.5）
   goals.js              開子帳戶（定存 / 目標）、進度條
   history.js            交易明細
-  admin.js              家長模式：待審清單（含家事照片縮圖）、代理確認、手動調帳、設定
+  admin.js              家長模式：待審清單（含照片縮圖，兩種 kind 混排）、代理確認、手動調帳、設定
   app.js                路由與主流程
   version.js            照抄（footer 顯示 commit hash）
 apps-script/
   Config.gs             SHEET_ID / TOKEN（同專案共用全域範圍，只能宣告一次）
   Code.gs               doGet / doPost / 登入 / snapshot / 家長操作 / 密碼雜湊
-                        （每月計息、每週零用錢 trigger 屬 M3，尚未實作）
+                        （每月計息 trigger 屬 M3，尚未實作；
+                         零用錢沒有 trigger 了，走 request/admin_decide，見 §9.6）
   Setup.gs              建分頁與種子資料、建帳號（只在編輯器手動執行）
 data/
   (無 — 所有資料來自 API)
@@ -406,6 +481,26 @@ data/
   家長頭像則切換成一般密碼輸入框。
 - **home**：登入後直接進來 → 四張帳戶卡（活期 / 紅包 / 各定存 / 各目標），總資產大字，
   「這個月預計利息 ○○ 元」誘導存錢，待審/到期提醒 badge。
+
+  **最上面是每日簽到卡**（小孩端，`role = kid` 才有），在帳戶卡之前——
+  它是每天打開 app 的第一個理由，不能藏在分頁裡：
+  - 今天還沒送 → 大字「今天的 20 元還沒領 👉」，點進 daily view。
+  - 今天已送、等確認 → 「⏳ 等媽媽確認 20 元」+ 送出時間。
+  - 今天已入帳 → 「✅ 今天的 20 元領到了」+ 確認人與確認時間。
+  - 被退回 → 「❌ 退回：⟨理由⟩，可以重做一次」，**當天仍可重送**（§9.6）。
+  文案只講「今天」，**不要出現「昨天沒領」之類的提示**——沒領到就是沒領到，
+  補不回來，提醒一次就夠了，不需要天天鞭屍（§9.6）。
+- **daily**：每日簽到頁（小孩端）。畫面由上到下就三段：
+  1. **三個大勾選框**，文字來自 `config.daily_checklist`（伺服器 snapshot 帶下來，
+     §7.1），**不要寫死在前端**——家長改設定，這裡就要跟著變。
+     項目數也不要寫死成 3，照著陣列長度畫。
+  2. **拍照區**：全部勾滿才亮起來，流程與 chores 完全一樣（`capture="environment"`
+     → canvas 壓縮 → 預覽 + 重拍，§7.5）。
+  3. **送出**：**少勾一項就 disabled、沒照片也 disabled**；伺服器端還會再擋兩次
+     （`checklist-incomplete` / `photo-required`，§7.2）。
+  送出後整頁換成「⏳ 等媽媽確認」狀態卡，可撤回；撤回或被退回都能當天重來。
+  頁尾一行小字寫今天的日期（`Asia/Taipei`）與「今天沒送出就沒有囉」，
+  不要倒數計時——那只會製造焦慮。
 
   **🧧 紅包卡是特例**：它不是投資選項，卡片語氣要誠實而溫暖，
   **不要有任何叫小孩把錢搬走的行動呼籲**。
@@ -443,8 +538,18 @@ data/
   **試算畫面是關鍵轉換點**，要把 10% 的威力視覺化。
 - **history**：全帳戶交易明細，可依帳戶篩選。
 - **admin**：僅 `role = parent` 的 session 可進入（伺服器判定，前端只是隱藏入口）。
-  待審清單一鍵核准/退回、手動調帳、**逐個小孩改每週零用錢**（`users.weeklyAllowance`）、編家事、看 `sessions` 踢掉裝置。
-  **家事待審項目多一張照片縮圖**：照片是 private 的，`<img>` 不能直接指向 Drive，
+  待審清單一鍵核准/退回、手動調帳、**逐個小孩改每日零用錢**（`users.dailyAllowance`）、
+  **改每日簽到的項目**（`config.daily_checklist`）、編家事、看 `sessions` 踢掉裝置。
+
+  **待審清單要分得出兩種 kind**，不能混成一團看不出誰是誰：
+  - 每一筆前面掛一個明顯的類型標記——每日簽到 `🌞 每日簽到`、家事 `🧹 <家事名稱>`。
+  - **每日簽到那筆要把勾選內容攤開**（讀 `requests.checklist`，三個項目逐條列出來打勾），
+    媽媽要看的是「他說他做到了什麼」＋照片，不是一個光禿禿的「簽到」兩個字。
+  - **金額顯示也不同**：家事是 `chores.reward`，每日簽到是該小孩的 `users.dailyAllowance`。
+    兩者都由伺服器算，前端只是顯示。
+  - **支援「按類型全選」**：「全部核准今天的每日簽到（3 筆）」是週日對帳日最常按的一顆鈕（§9.4）。
+    全選核准仍然逐筆走 `admin_decide`，代理規則一樣要過（§9.5）。
+  **兩種待審項目都各有一張照片縮圖**：照片是 private 的，`<img>` 不能直接指向 Drive，
   必須帶 session 打 `chore_photo`（§7.6）拿 base64，再塞進 `img.src = 'data:image/jpeg;base64,' + data`。
   因此縮圖**一律延遲載入**——先畫一個佔位框＋spinner，捲到畫面內（或家長點開該筆）才去抓，
   **不要一進待審清單就把十張照片一起抓**（一張一趟往返、每趟 1～2 秒，會整頁卡住）。
@@ -487,8 +592,11 @@ data/
                   "rateMonthly": 0.05, "lockUntil": null, "targetAmount": null,
                   "balance": 0, "status": "active" } ],
   "ledger":   [ /* 自己的最近 50 筆，新到舊 */ ],
-  "requests": [ /* 自己的 pending */ ],
-  "chores":   [ /* active 且屬於自己或公開的家事 */ ] }
+  "requests": [ /* 自己的 pending，外加今天/本期間已決定的 chore_done 與 allowance_claim */ ],
+  "chores":   [ /* active 且屬於自己或公開的家事 */ ],
+  "dailyChecklist": [ "好好照顧自己", "尊重別人的需求", "完成自己的工作" ],
+  "dailyAllowance": 20,
+  "today": "2026-09-18" }
 ```
 
 `role = parent`：
@@ -510,25 +618,40 @@ data/
 - `lockUntil` 是 ISO 字串或 `null`；`targetAmount` 是整數或 `null`（沒設就是 `null`，不是 0）。
 - `balance` 是整數元。家長端沒有 `chores`；小孩端沒有 `kids`。
 - 小孩 session 打 snapshot 時，若活期／紅包帳戶還不存在會自動補建。
-- 小孩端的 `requests` 除了 `pending`，還要**額外帶回「今天（或本週）已決定」的 `chore_done`**，
-  含 `status` · `photoFileId` · `decidedTs` · `decidedBy` · `decidedProxy` · `decidedNote`。
-  沒有這些，chores 頁畫不出「今天已回報 / 媽媽在 9/18 晚上 9:14 確認」的狀態（§6）。
+- 小孩端的 `requests` 除了 `pending`，還要**額外帶回「今天（或本週）已決定」的 `chore_done`
+  與「今天已決定」的 `allowance_claim`**，
+  含 `status` · `photoFileId` · `decidedTs` · `decidedBy` · `decidedProxy` · `decidedNote`，
+  `allowance_claim` 另帶 `checklist`。
+  沒有這些，chores 頁與 daily 頁畫不出「今天已回報 / 媽媽在 9/18 晚上 9:14 確認」的狀態（§6）。
+- `dailyChecklist` 是**陣列**，由伺服器把 `config.daily_checklist` 以 `|` split 後 trim 而成
+  （順序即顯示順序）。前端照著它畫勾選框，**項目文字與項目數都不寫死**（§6）。
+  家長端不需要這個欄位，但 admin 的「改項目」表單要用，所以 `role = parent` 也一起帶。
+- `dailyAllowance` 是該小孩自己那一列的金額（整數元），**只供顯示**；
+  真正入帳的金額是核准當下伺服器再查一次的值（§9.6）。
+- `today` 是伺服器以 `Asia/Taipei` 算出的今天（`yyyy-MM-dd`）。
+  前端**不要拿裝置時間判斷「今天有沒有簽到」**——小孩把手機時間調前一天就能多領一次，
+  日界線一律以伺服器為準。
 - 家長端的 `requests` 帶 `photoFileId`（**不是圖片內容**，snapshot 不塞 base64）供待審清單
   延遲抓縮圖用（§7.6），並帶 `chore_approver`
   （放在頂層，值同 `config.chore_approver`），讓 admin 知道自己按下去是正式確認還是代理。
+  `kind = allowance_claim` 那幾筆另外帶 `checklist`（原字串，前端自己 split 攤開）
+  與 `amount`（伺服器從該小孩的 `users.dailyAllowance` 帶的顯示值），
+  否則待審清單畫不出「他勾了哪三項、這筆是多少錢」（§6）。
+  頂層另帶 `dailyChecklist` 供 admin 的設定表單用。
 
 ### 7.2 `POST`（body JSON）
 
 | action | 參數 | 說明 |
 |---|---|---|
 | `transfer` | from, to, amount | 帳戶間轉帳，**免審，直接入帳**（見 §9.2）。**`from` 或 `to` 任一方 `type === 'gift'` 一律拒絕**（見下） |
-| `request` | kind, amount, choreId, note, **photo**, **photoMime** | 建立申請（僅三種 kind）。`kind = chore_done` 時 `choreId` 與 `photo`（壓縮後的 JPEG base64，不含 `data:` 前綴）**皆為必填**，並做一天一次檢查（見下） |
+| `request` | kind, amount, choreId, note, **photo**, **photoMime**, **checks** | 建立申請（僅四種 kind）。`kind = chore_done` 時 `choreId` 與 `photo`（壓縮後的 JPEG base64，不含 `data:` 前綴）**皆為必填**，並做一天一次檢查（見下）。`kind = allowance_claim` 時 `checks` 與 `photo` **皆為必填**，並做一天一次檢查（見下） |
 | `cancel_request` | requestId | 小孩自己撤回 |
 | `open_account` | type, name, emoji, termMonths\|targetAmount | 開子帳戶。`termMonths` 由小孩自由填（見 §4.3），不是固定選項；**伺服器端驗證 3 ≤ termMonths ≤ 12** |
 | `admin_decide` | requestId, decision, note, **proxy** | 核准/退回。家事的核准者必須是 `config.chore_approver`，其他家長要代理時必須明確帶 `proxy: true`（見下與 §9.5） |
 | `admin_adjust` | kidId, accountId, amount, memo | 手動入帳/扣款/罰款 |
 | `admin_gift` | kidId, amount, memo | 紅包入 `gift` |
-| `admin_config` | key, value | 改 `config` 的利率等設定；改某個小孩的零用錢是改 `users.weeklyAllowance` |
+| `admin_config` | key, value | 改 `config` 的利率、`daily_checklist` 等設定；改某個小孩的零用錢**不走這支**，是改 `users.dailyAllowance`（走 `admin_set_allowance`） |
+| `admin_set_allowance` | kidId, amount | 改某個小孩的 `users.dailyAllowance`（整數、0 ≤ amount ≤ 1000）。**只改設定，不入帳** |
 | `admin_revoke_session` | token | 踢掉某台裝置 |
 | `change_password` | oldPassword, newPassword | 自己改密碼 |
 
@@ -569,8 +692,8 @@ UI 不給轉帳按鈕（§6）只是不要讓小孩白試，真正擋下來的�
    - **期間定義（一律以 `Asia/Taipei` 計算，不用 UTC、不用瀏覽器時區）**：
      - `repeat = 'daily'`：日界線是台北時間 **00:00–23:59:59**。
        實作上比對 `Utilities.formatDate(ts, 'Asia/Taipei', 'yyyy-MM-dd')` 相等即同一天。
-     - `repeat = 'weekly'`：**週日 00:00（台北）起算的七天**，與 §4.5／§9.4 的
-       「週日早上＝零用錢與對帳日」對齊。比對 `yyyy-'W'ww` 不可靠（locale 週起始日不同），
+     - `repeat = 'weekly'`：**週日 00:00（台北）起算的七天**，與 §9.4 的
+       「週日早上＝對帳日」對齊（對帳日已與發薪脫鉤，§9.6）。比對 `yyyy-'W'ww` 不可靠（locale 週起始日不同），
        改用「把 ts 往前退到最近一個週日 00:00，比對那個日期字串」。
      - `repeat = 'once'`：全期間唯一，有任何一筆 pending/approved 就不能再報。
    - 比對用的是 `requests.ts`（伺服器寫入時間），**不是前端送的時間**。
@@ -582,9 +705,57 @@ UI 不給轉帳按鈕（§6）只是不要讓小孩白試，真正擋下來的�
 
 **不在這裡入帳。** `chore_done` 一律是 `pending`，錢要等 §9.5 的確認才進 `current`。
 
+#### `request`（`kind = allowance_claim`）的伺服器端驗證
+
+每日簽到**刻意跟家事共用同一套機具**：同一支 `request`、同一條 Drive 照片路徑（§7.5）、
+同一個 `clientId` 冪等、同一套 `admin_decide` 核准者與代理規則（§9.5 三）。
+下面只列出不一樣的地方；沒列到的就是跟 `chore_done` 一字不差。
+驗證順序固定如下，**任何一條不過就不寫 Drive、也不寫 Sheet**：
+
+1. **身分**：`session.role === 'kid'`，`kidId` 一律取自 session，不接受請求帶。
+2. **冪等**：先查 `requests` 有沒有相同 `clientId`；有就直接回傳原本那筆。
+3. **項目設定**：讀 `config.daily_checklist`，以 `|` split、逐段 `trim()`、捨棄空段，
+   得到項目陣列 `items`。`items.length === 0` → `ok:false, error:'server'`，
+   訊息「每日簽到的項目還沒設定好，請家長檢查」。**不要 fallback 成「不用勾也能領」。**
+4. **三項全勾**（真正的新規則）：請求帶 `checks`，是一個**布林陣列**。
+   - `checks` 不是陣列、或 `checks.length !== items.length`
+     → `ok:false, error:'checklist-incomplete'`。
+   - 其中**任何一項不為真**（`false` / 缺漏 / 空字串 / `0`）
+     → 同樣 `checklist-incomplete`，訊息「三件事都要做到才能領今天的零用錢喔」
+     （訊息裡的「三」依 `items.length` 動態產生，家長改成四項時要跟著變）。
+   - 判定條件是**「數量等於設定的項目數且全為真」**，**不是寫死比對 3**——
+     這樣家長增減項目不必改程式（§5 `daily_checklist`）。
+   - 只接受全勾，所以 `requests.checklist` 寫入時每一項的值必然是 `1`；
+     格式見 §5，存的是**當下的項目文字**，不是索引。
+5. **照片必填**：與 `chore_done` 第 4 條完全相同（`image/jpeg`、上限 1.5 MB、
+   下限 2 KB、base64 解不開就算沒照片）。
+6. **一天一次**：同一個 `kidId`，在**同一個台北日**內已經有一筆
+   `status = 'pending'` 或 `status = 'approved'` 的 `allowance_claim` → 拒絕，
+   `ok:false, error:'already-claimed'`，訊息「今天的零用錢已經送出囉」。
+   - 期間判定**沿用 `chorePeriodKey(repeat, ts)` 的 `daily` 規則**（`repeat` 傳 `'daily'`），
+     也就是比對 `Utilities.formatDate(ts, 'Asia/Taipei', 'yyyy-MM-dd')` 相等即同一天。
+     不用 UTC、不用瀏覽器時區。
+   - **不比對 `choreId`**（每日簽到沒有 choreId，一天就一筆，跟家事那條的
+     「kidId + choreId」不同）。
+   - `rejected` 與 `cancelled` **不算數**：被退回或自己撤回之後**當天還可以重送**。
+     這一條很重要——不然媽媽退回一次，小孩就永遠拿不到那天的 20 元（§9.6）。
+   - 比對用的是 `requests.ts`（伺服器寫入時間），**不是前端送的時間**。
+     離線補送因此算在「補送當下」那一天，可能就跨過午夜變成隔天的簽到——
+     UI 在離線送出時必須明寫「等有網路才會送出，會算在送出那天」（§7.5）。
+7. **寫入**：先傳照片到 Drive（檔名的 `<choreId>` 位置寫 `allowance`，§5），
+   再寫 `requests`（`status = 'pending'`、`photoFileId`、`checklist`、
+   `choreId` 留空、`amount` 留空）。失敗處理見 §7.5。
+   回傳 `{ ok:true, requestId, photoFileId }`。
+
+**不在這裡入帳，也不在這裡決定金額。** `allowance_claim` 一律是 `pending`；
+金額要等核准當下伺服器查 `users.dailyAllowance` 才算（§9.6），
+**請求帶的 `amount` 一律忽略**（跟家事不採信前端金額是同一個道理）。
+
 #### `admin_decide` 的核准者規則
 
-在既有的 `session.role === 'parent'` 之上，`kind = chore_done` 多一層：
+在既有的 `session.role === 'parent'` 之上，`kind = chore_done`
+**與 `kind = allowance_claim`** 多一層（兩者規則**完全一樣**，
+下表的 `chore_done` 一律連同 `allowance_claim` 一起讀）：
 
 | 情況 | 行為 |
 |---|---|
@@ -595,6 +766,13 @@ UI 不給轉帳按鈕（§6）只是不要讓小孩白試，真正擋下來的�
 | `decision = 'reject'` | 同樣適用上述代理規則——**退回也是決定**，也要記得是誰退的 |
 
 `proxy: true` 對 `withdraw` / `term_break` 無意義，伺服器忽略該旗標（那兩種任何家長都能決定）。
+`config.chore_approver` 這個 key **名字沒改**（值仍預設 `vicky`），但它現在管的是
+**家事＋每日簽到兩件事**——名字有點窄，不值得為了改名去動既有設定與程式（§9.6）。
+
+核准 `allowance_claim` 時另外多一條伺服器端檢查：**金額不採信任何前端輸入**，
+一律查該小孩的 `users.dailyAllowance`。查不到、非數字、或 ≤ 0
+→ `ok:false, error:'zero-amount'`，訊息「這個小孩的每日零用錢還沒設定，請家長先去設定」，
+**不寫 ledger、request 維持 `pending`**（不要核准一筆 0 元的帳）。
 
 不論核准或退回，一律寫回 `decidedTs`（伺服器時間）、`decidedBy`、`decidedProxy`、`decidedNote`；
 核准另外寫一筆 ledger（見 §9.5）。已經是 `approved` / `rejected` / `cancelled` 的 request
@@ -632,6 +810,9 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 | `not-your-photo` | 小孩想抓**別人**那筆 request 的照片（家長不受限） | 顯示「這不是你的照片」；這是越權，不是暫時性錯誤，**不要重試** |
 | `photo-missing` | `photoFileId` 是空的，或 Drive 上那個檔案已被刪除／移到垃圾桶 | 顯示「照片讀不到」（不是破圖）；家長端**不要因此就順手核准** |
 | `already-reported` | 這件家事在本期間已有 pending/approved | **不要重試、不要進離線佇列**，把該卡片切成「今天已回報」 |
+| `checklist-incomplete` | 每日簽到的勾選項目沒有全部勾滿（或數量與 `config.daily_checklist` 不符） | 回到勾選那一步，顯示 `message`（「三件事都要做到才能領今天的零用錢喔」）。**不要重試、不要進離線佇列**；若是數量不符，順手重抓 snapshot 更新項目清單 |
+| `already-claimed` | 今天的每日零用錢已經送出過（同一台北日已有 pending/approved 的 `allowance_claim`） | **不要重試、不要進離線佇列**，把簽到卡切成「⏳ 等媽媽確認」或「✅ 今天領到了」 |
+| `zero-amount` | 核准時查 `users.dailyAllowance`（或 `chores.reward`）是 0／沒設定 | 家長端顯示 `message`，請先去設定金額再核准；該筆維持 `pending` |
 | `needs-proxy` | 非指定核准者要核准家事，但沒按「代替確認」 | 把按鈕換成「代替 Vicky 確認」，等家長再按一次；**不自動重送** |
 | `already-decided` | 這筆 request 已經被別人決定了 | 重新抓 snapshot，顯示現況 |
 | `bad-json` / `unknown-action` / `server` | 請求格式錯、action 不認得、伺服器例外 | 顯示 `message`，視為暫時性錯誤 |
@@ -687,8 +868,15 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 
 **離線佇列**：帶照片的 `request` 一樣進 IndexedDB queue，但 base64 會讓 queue 變肥——
 **單一佇列項目超過 1 MB 就不要存**，直接告訴小孩「現在沒網路，等一下有網路再報一次」。
-另外 `already-reported` 與 `photo-required` 是**永久性失敗**，收到就把該項目丟出佇列，
-不要無限重試（§7.4）。
+另外 `already-reported`、`already-claimed`、`checklist-incomplete` 與 `photo-required`
+是**永久性失敗**，收到就把該項目丟出佇列，不要無限重試（§7.4）。
+
+> ⚠️ **每日簽到特別不適合離線送。** 「當天沒送出就沒了」的判定用的是 `requests.ts`
+> （伺服器寫入時間，§9.6），所以晚上 11:55 離線送出、12:05 才復網補送的那一筆
+> **會算成隔天的簽到**——昨天就此落空，而且隔天還會因為已經有一筆而回 `already-claimed`。
+> 所以每日簽到頁在偵測到離線時**要直接明講**：
+> 「現在沒網路，等一下有網路才會送出，會算在真正送出去的那一天。」
+> 不要靜靜地丟進佇列讓小孩以為領到了。
 
 ### 7.6 `GET ?action=chore_photo&requestId=…&token=…&session=…`
 
@@ -776,17 +964,23 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 | 動作 | 需核准 | 理由 |
 |---|---|---|
 | `chore_done` 回報家事完成 | ✅ **要審** | 錢從現實進來。「我倒了垃圾」只有家長能證實，這是最需要把關的一項。**必須附照片，且只有 `config.chore_approver`（或代理）能確認——細節見 §9.5** |
+| `allowance_claim` 每日簽到領零用錢 | ✅ **要審** | 錢從現實進來。「我今天有好好照顧自己」同樣只有家長能證實。**三項全勾＋一張照片才送得出，核准者規則與家事完全相同——細節見 §9.6** |
 | `withdraw` 提領現金（從 `current` **或 `gift`**） | ✅ **要審** | 錢離開系統變成真鈔，家長要實際掏錢。**紅包帳戶唯一的出口就是這一條** |
 | `term_break` 定存提前解約 | ✅ **要審** | 不是邊界問題，而是**打破自己的承諾**，要有人擋一下、問一句「真的嗎？」 |
 | 主帳戶 → 定存／目標 | ❌ 免審 | 存錢，零摩擦鼓勵。小孩按下去就成立 |
 | 🧧 紅包帳戶 ↔ 任何帳戶 | **不存在這個動作** | `gift` 是純保管帳戶，不參與轉帳；伺服器直接拒絕（§7.2 `gift-no-transfer`） |
 | 定存到期／目標達標 → 主帳戶 | ❌ 免審 | 條件已滿足，系統自己判定得出來 |
 | `open_account` 開定存／目標子帳戶 | ❌ 免審 | 開戶本身不動錢 |
-| 每週零用錢、每月利息 | ❌ 免審 | 系統自動，人不該能插手 |
+| 每月利息 | ❌ 免審 | 系統自動，人不該能插手 |
 | 紅包入帳、罰款、手動調帳 | — | 本來就是家長自己發起的動作 |
 
-因此 `requests.kind` 只有三種：`chore_done` · `withdraw` · `term_break`。
+因此 `requests.kind` 有**四種**：`chore_done` · `allowance_claim` · `withdraw` · `term_break`。
 轉帳不進 `requests`，`transfer` 直接寫 ledger。
+
+> 📌 **零用錢從「系統自動」那一列搬到「要審」那一列了。** 舊版這張表寫的是
+> 「每週零用錢、每月利息 ❌ 免審 — 系統自動，人不該能插手」。
+> 零用錢改成每日簽到制之後（§9.6），它變成**跨越現實邊界的收入**，
+> 性質跟家事一樣，所以進了核准流程。**只有利息還留在「系統自動、人不該能插手」那一格。**
 
 ### 9.3 免審的代價：定存要擋一次
 
@@ -810,11 +1004,28 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 
 - 小孩端：提領／家事／解約送出後顯示「等爸爸媽媽確認中 ⏳」，可自己撤回。
   被退回時**必須看到家長寫的理由**（`decidedNote` 退回時為必填）。
-- 家長端 admin 待審清單：三種 kind 混在同一條時間軸，支援逐筆核准與**全選核准**。
-  首頁顯示待審數量 badge。
-- **週日早上＝對帳日**：零用錢發完後，家長端 admin 首頁跳出「本週待審 ○ 件」的提醒。
-  核准因此變成每週一次的固定儀式，家長不會被小孩隨時催，小孩也知道什麼時候會有答案。
+- 家長端 admin 待審清單：四種 kind 混在同一條時間軸，支援逐筆核准、**按類型全選**與**全選核准**；
+  每一筆前面掛類型標記，每日簽到那筆要攤開勾選內容（§6）。首頁顯示待審數量 badge。
+- **週日早上＝對帳日（保留）**：家長端 admin 首頁跳出「本週待審 ○ 件」的提醒，
+  核准變成每週一次的固定儀式，家長不會被小孩隨時催，小孩也知道什麼時候會有答案。
   急件仍可隨時核准，只是不必天天看。
+
+  > ⚠️ **對帳日不再跟發薪綁在一起。** 舊版寫的是「零用錢發完後……」——
+  > 每週日早上 8:00 自動發零用錢的 trigger 已經移除（§9.6），
+  > 週日早上現在**沒有任何系統動作**，對帳日純粹是家長自己的習慣與 UI 提醒。
+  > 概念保留，是因為**家事仍然需要它**（weekly 家事的期間也是以週日 00:00 起算，§7.2）。
+
+  > 📊 **量要先算清楚：三個小孩 × 每天一筆 = 每週 21 筆每日簽到**，再加上家事
+  > （以每人每天 1～3 件估，一週再多 20～60 筆）。**週日一次批 21 筆是可行的**——
+  > 每筆就是「看一眼照片、掃一眼三個勾、按核准」，配上「按類型全選」大約幾分鐘的事。
+  > 但**這個量級本身是新的**：舊設計的零用錢是 0 筆待審（系統自動發），
+  > 現在是每週 21 筆、一年約 1,095 筆。清單的分頁、全選、照片延遲載入（§6）
+  > 不是加分項，是這個量級下的**必要條件**。
+  >
+  > ⏱️ **但「攢到週日一起批」跟「當天沒領就沒了」會撞在一起**——
+  > 小孩禮拜二送出、媽媽禮拜天才批，那 20 元到底算不算禮拜二領到的？
+  > **這一題 §9.6「三、送出日 vs 核准日」已經明文裁決：以送出時間為準。**
+  > 不寫清楚的話，這是家裡第一場吵架。
 - 核准時寫 ledger，`refId` 指向 requestId；退回不寫 ledger。
 
 ### 9.5 家事：照片證據與代理確認 ✅ 已定案
@@ -891,50 +1102,154 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 - **history 交易明細**：`chore` 那筆列出金額、家事名稱、確認人與確認時間，
   可以點開看當時那張照片。
 
-`chore` 是唯一一種「入帳時間」與「事情發生時間」可能差很多的收入
+`chore` 與 `allowance_claim` 是「入帳時間」與「事情發生時間」可能差很多的兩種收入
 （週五做的家事週日才批），明細上要以**核准時間**為 ledger 的 `ts`，
 但 memo 裡帶上回報日期，免得小孩對不起來。
+
+### 9.6 每日零用錢：每天走一次流程才領得到 ✅ 已定案（2026-09-18）
+
+> **每天在 app 裡勾完三個自我檢核項目 → 拍一張照片 → 送出 → 媽媽確認 → 20 元進活期主帳戶。**
+> 沒有自動發放，沒有補領。
+
+這一節取代舊設計的「每週日早上 8:00 由 time-driven trigger 自動入帳」。
+那個 trigger **不存在了**，`config.allowance_weekday` / `allowance_hour` 也一併移除（§5）。
+零用錢從「系統自動、人不該能插手」變成「跨越現實邊界、要家長背書」的一筆收入（§9.2）。
+
+#### 一、三個自我檢核項目
+
+| # | 項目 |
+|---|---|
+| 1 | 好好照顧自己 |
+| 2 | 尊重別人的需求 |
+| 3 | 完成自己的工作 |
+
+- **三項都要勾才能送出。** 少一項就送不出去——UI 把送出鍵 disable，
+  伺服器再擋一次（`checklist-incomplete`，§7.2）。
+  **沒有「勾兩項領 13 元」這種部分給付**，這不是計件工資，是一個全有全無的每日約定。
+- **項目存在 `config.daily_checklist`，不寫死在程式裡**（格式與預設值見 §5）。
+  伺服器的驗證條件是「**勾選數量等於設定的項目數，且全部為真**」，不是比對 3，
+  所以家長之後想加第四項或砍到兩項，改 `config` 一格就好，前後端都不用動。
+- **勾選內容要留痕**：寫進 `requests.checklist`（§5），存的是**當下的項目文字**。
+  家長事後改設定，歷史紀錄仍然查得出「那天他勾的是哪三件事」。
+- 這三句話是**自我檢核**，不是家事。它們刻意寫得抽象、無法用照片證明——
+  照片不是證據，是**儀式**（見下）。
+
+#### 二、拍照
+
+- **跟家事一樣要拍一張照片**：同一條 Drive 路徑、同一個資料夾、同樣不 `setSharing`、
+  同樣只能經 `chore_photo`（§7.6）看圖。技術細節全部在 §5 與 §7.5，這裡不重複。
+- **一天一張**，不是一個項目一張。
+- 誠實地說：**這張照片證明不了「我有尊重別人的需求」**。它的作用有兩個——
+  一是讓「送出」這件事有實體動作、不是無腦按鈕；
+  二是給媽媽一個開口的機會（「你今天拍這個，是哪件事做得好？」）。
+  **不要在 UI 上宣稱照片是證據**，也不要為此發明一套「該拍什麼」的規則。
+  拍得敷衍就退回、順口講一句——跟家事一樣，這是人的事，不是程式的事（§9.5 一）。
+
+#### 三、送出日 vs 核准日 ⚖️ 本節最重要的一條
+
+> **以 `requests.ts`（小孩按下送出、伺服器寫進 Sheet 的那一刻）認定是哪一天的簽到。
+> 核准時間（`decidedTs`）不影響資格，媽媽多久才批都不影響那 20 元的歸屬。**
+
+會有這一題，是因為「當天沒領就沒了」配上「要媽媽確認」必然撞在一起：
+小孩禮拜二晚上送出，媽媽禮拜天對帳日（§9.4）才批——這算不算禮拜二領到？
+**算。** 具體規則：
+
+1. **資格看送出日。** `already-claimed` 的一天一次判定比對的是 `requests.ts`，
+   用 `chorePeriodKey('daily', ts)`（台北 00:00–23:59:59，§7.2）。
+2. **`pending` 不會過期。** 禮拜二送出的那一筆，禮拜天批下去照樣入帳 20 元，
+   **不會因為「已經不是禮拜二了」就自動作廢**。系統沒有任何一支程式會去砍舊的 pending。
+3. **ledger 的 `ts` 仍是核准時間**（與家事一致，§9.5 五），
+   但 **`memo` 必須帶上簽到日期**：「每日簽到（9/15）」。
+   禮拜天入帳六筆、memo 分別寫 9/15 到 9/20，小孩才對得起來。
+4. **「沒領到」只有一種情況：那天根本沒送出。** 不是「送了但媽媽還沒批」。
+5. **被退回 / 自己撤回，當天還能重送**（`rejected` / `cancelled` 不佔扣打，§7.2）。
+   但**跨過午夜就真的沒了**：禮拜二被退回、禮拜三才重做，那筆算禮拜三的，
+   禮拜二就是空的。這一條要在退回通知裡講清楚：「今天還可以再做一次喔」。
+6. **不能補領昨天的。** 沒有任何一支 API 接受「指定日期」的簽到，
+   `requests.ts` 一律是伺服器時間、由伺服器寫，前端送什麼時間都不看。
+   離線佇列補送因此可能跨到隔天——UI 要事先明講（§7.5）。
+
+> 這條裁決的理由：**小孩能控制的只有「有沒有送出」，媽媽什麼時候有空批不是他的責任。**
+> 反過來（以核准日認定）等於媽媽出差三天就扣三天零用錢，
+> 而 §9.5 三已經為了同一個理由留了代理確認那條路。同一套價值觀，兩處一致。
+
+#### 四、確認之後記錄什麼
+
+核准時（在 §7.3 的 script lock 內，一次寫完），與家事同一支 `admin_decide`：
+
+1. 更新 `requests`：`status = 'approved'`、`decidedTs`（伺服器時間）、
+   `decidedBy`（**實際按的人**）、`decidedProxy`、`decidedNote`（核准時選填）。
+2. 寫一筆 `ledger`：
+
+   | 欄位 | 值 |
+   |---|---|
+   | `type` | `allowance` |
+   | `kidId` | request 的 kidId |
+   | `accountId` | 該小孩**目前 `status = 'active'` 的 `current` 活期主帳戶**（§2：所有收入先進活期） |
+   | `amount` | **伺服器查該小孩自己的 `users.dailyAllowance`**，正數。**不採用前端送的數字**；查不到或 ≤ 0 就不核准（`zero-amount`，§7.2） |
+   | `by` | **實際核准者的 userId**（代理時就是 `aug`，不是 `vicky`） |
+   | `refId` | requestId |
+   | `clientId` | `req:<requestId>`（一筆 request 只入得了一次帳，兩個家長搶著按也一樣） |
+   | `memo` | 「每日簽到（9/15）」；代理時後綴「· Aug 代替 Vicky 確認」 |
+
+3. 退回不寫 ledger，但一樣要寫 `decidedBy` / `decidedProxy` / `decidedTs`，
+   `decidedNote` 退回時必填（§9.4），而且小孩要看得到那句理由。
+
+#### 五、誰能確認
+
+**與家事完全相同**，一字不差：指定核准者是 `config.chore_approver`（預設 `vicky`），
+其他家長要代理就得多按一次「代替確認」（先收 `needs-proxy`，再帶 `proxy: true`），
+代理會寫進 `decidedProxy` 與 ledger 的 `memo`。細節見 §9.5 三，這裡不重複。
+
+`config` 的 key 名字仍叫 `chore_approver`（沒有另開一個 `allowance_approver`）——
+它現在管兩件事。名字窄了一點，但多一個 key 就多一個會忘記改的地方，不划算。
+
+#### 六、量與預算（已決定，不再討論）
+
+- **三個小孩 × 每天一筆 = 每週 21 筆待審、一年約 1,095 筆**，再加上家事。
+  對帳日的負荷評估見 §9.4。
+- **每人每天 20 元 = 一年 7,300 元（365 天全勤上限），三人 21,900 元**
+  ——舊設計（每週 20）是三人一年 3,120 元。完整試算與「全存活期會滾到多少」見 §4.5。
+- 這個預算變動**使用者已明確接受**（「不用管錢的問題，因為小孩會領出來花掉」），
+  **記錄在案，不重開討論**。
 
 ---
 
 ## 10. 待決事項 🔴
 
 - 小孩人數與名單、年齡（影響 UI 用字）
-- ~~每個小孩的 `weeklyAllowance` 金額（逐人設定）~~ ✅ **已定案**：三人一律 **20**（欄位仍逐人可調，見 §5）
+- ~~每個小孩的 `weeklyAllowance` 金額（逐人設定）~~ ✅ **已定案**：欄位改名為 `dailyAllowance`，
+  三人一律**每天 20**，且**要每天走一次簽到流程才領得到**（§9.6；欄位仍逐人可調，見 §5）
 - 家事清單初始內容與定價
-- 🔴 **冷啟動：頭幾個月「錢不會變多」的風險（開帳金？）**
-  金額定案後把數字算出來，結論不太妙。以每週日入帳、每月 1 日結息、`Math.round` 不足 1 元記 0（§3）
-  計算，**只靠零用錢、完全不花錢**存滿一年（52 週、12 次結息；月份取 4／4／5 週輪替）。
+- ✅ ~~**冷啟動：頭幾個月「錢不會變多」的風險（開帳金？）**~~
+  **改成每日 20 元之後大致解掉了，不再列為待決事項。**
+  以每天入帳 20 元、每月 1 日以結算當下餘額計息、`Math.round` 不足 1 元記 0（§3）
+  計算，**只靠零用錢、完全不花錢**存滿一年（365 天全勤、12 次結息）。
   三人金額相同，所以三條線完全一樣：
 
-  | 小孩 | 每週 | 一年零用錢 | 一年利息 | 一年後活期餘額 | **第一次結息** |
+  | 小孩 | 每日 | 一年零用錢 | 一年利息 | 一年後活期餘額 | **第一次結息** |
   |---|---|---|---|---|---|
-  | Momo | 20 | 1,040 | 404 | **1,444** | **+4 元** |
-  | Coco | 20 | 1,040 | 404 | **1,444** | **+4 元** |
-  | Dodo | 20 | 1,040 | 404 | **1,444** | **+4 元** |
+  | Momo | 20 | 7,300 | 2,855 | **10,155** | **+31 元** |
+  | Coco | 20 | 7,300 | 2,855 | **10,155** | **+31 元** |
+  | Dodo | 20 | 7,300 | 2,855 | **10,155** | **+31 元** |
 
-  （每週 20 ≈ **每月 87 元**。一年下來利息 404 元，約佔期末餘額的 **28%**，長期是有感的。
-  實際起算月份不同，年利息會在 400～420 元之間小幅浮動。）
+  （舊設計每週 20 的同一張表是：一年 1,040 元、利息 404 元、期末 1,444 元、第一次結息 **+4 元**。）
 
-  問題在**開頭**：利息一個月才結一次，所以**第一個月整整四週，小孩看到的利息是 0 元**；
-  等到第一次結息，餘額 80 元、利息 **+4 元**——**三個人一模一樣**。
-  也就是說這不再是「Dodo 特別慘」的公平問題，而是**每個人一開始都一樣薄**：
-  沒有人會因為拿得多而先嚐到甜頭，冷啟動是全家同時發生的。
-  而 §3 已經寫明「餘額低於 20 元的活期帳戶幾乎沒有利息」——一開始餘額本來就在那個區間。
-  §11 也已經寫明：**「看到錢變多」是這個 app 唯一能讓小孩持續打開它的理由**。
-  也就是說，**最需要留住小孩的前幾週，正好是利率最沒感覺的幾週**，
-  §2 的「活期 5% vs 定存 10%」那堂課在本金只有幾十元時也根本演不出來。
-
-  **可能的解法是給一筆「開帳金」，或第一個月一次性補一筆本金**（走 `admin_adjust`），
-  讓餘額一開始就站在利息看得見的高度。金額未定。
-  **不是**把紅包帳戶打開來充數——`gift` 不參與轉帳是規則，不是待議事項（§2、§7.2）。
-  **還沒決定。**
+  **第一次結息從 +4 元變成 +31 元**，滿一個月時本金就有 620 元——
+  這個高度利息才「看得見」，§2 的「活期 5% vs 定存 10%」那堂課也終於演得出來
+  （620 元鎖三個月 = 變成 825 元，數字大到有感）。
+  第一個月仍然是 0 元利息（一個月才結一次，這是規則），但那只有一個月，
+  而且那個月裡小孩每天都會因為簽到看到餘額 +20，**不缺打開 app 的理由**。
+  **因此「開帳金」暫時不需要**；真的想加速也還是走 `admin_adjust`，
+  **不是**把紅包帳戶打開來充數（§2、§7.2）。
 - 🔴 **`credentials` 的存放位置**：現在密碼雜湊與帳本同在一份 Sheet，
   隱藏 + 保護只擋編輯不擋讀取（見 §5、§8.1）。在決定前的鐵則是**這份 Sheet 不分享給任何人**；
   若之後真的需要讓家人看帳，要先把 `credentials` 搬到另一份不分享的試算表，
   或確定一律走 app 的家長模式
-- 🔴 **家事照片的保存期限與 Drive 配額**：照片目前**永久留在**擁有者的 Drive，
-  三個小孩 × 每天約 3 件 ≈ 一年 3000 張、以 300 KB 計約 1 GB——
+- 🔴 **照片的保存期限與 Drive 配額**（量因為每日簽到又變大了）：照片目前**永久留在**擁有者的 Drive。
+  家事：三個小孩 × 每天約 3 件 ≈ 一年 3,000 張。
+  **每日簽到再加 3 人 × 365 天 = 一年 1,095 張**，合計約 **4,095 張／年**、
+  以 300 KB 計約 **1.2 GB／年**——
   免費 15 GB 額度撐得住好幾年，但那個額度是跟 Gmail 共用的，而且沒有人會去清。
   要不要加一個「保留 N 天後自動刪除」的 trigger（刪檔但保留 `requests` 紀錄，
   讓 `chore_photo` 回 `photo-missing`、前端顯示「照片已過期」）？**還沒決定**，v1 先不刪。
@@ -955,10 +1270,17 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 |---|---|---|
 | **M1 骨架** ✅ *（差後端部署）* | Sheet 建表、Apps Script `snapshot` + `admin_adjust`、前端 home 顯示餘額 | 家長手動入帳，小孩手機看得到 |
 | **M2 核心流** | 轉帳、開子帳戶（定存/目標）、交易明細 | 活期 → 定存／目標 → 回活期 全鏈路走得通；紅包帳戶的轉帳一律被伺服器擋下 |
-| **M3 自動化** | 每週零用錢 trigger（**週日早上 8:00**，同時是對帳日，見 §9.4）、每月計息 trigger、到期提醒 | 跨月測試利息正確、定存到期轉 matured |
-| **M4 審核** | requests（三種 kind）+ admin 待審清單 | 小孩申請提領 → 家長核准 → 入帳；退回看得到理由 |
+| **M3 自動化** | **每月計息 trigger**、到期提醒 | 跨月測試利息正確、定存到期轉 matured |
+| **M4 審核** | requests（四種 kind）+ admin 待審清單（兩種要審的 kind 要分得出來） | 小孩申請提領 → 家長核准 → 入帳；退回看得到理由 |
 | **M5 離線與韌性** | IndexedDB queue + clientId 冪等 + 快照新鮮度 | 飛航模式操作 → 復網自動補送且不重複入帳 |
 | **M6 家事與獎勵（含照片）** ⬆️ *提前到 M4 之後緊接著做* | chores 清單、**拍照＋canvas 壓縮**、**Drive 照片子系統**、`request(chore_done)` 的一天一次伺服器檢查、`admin_decide` 的指定核准者與**代理確認**、確認時間／確認人顯示 | 小孩拍照回報 → Vicky（或 Aug 代理）確認 → 入活期；沒照片送不出、同一件一天報不了第二次；小孩看得到「媽媽在 X 時確認」 |
+| **M7 每日簽到零用錢** 🆕 | daily view（三個勾選項目來自 `config.daily_checklist`）、`request(allowance_claim)` 的全勾＋照片＋一天一次驗證、核准入帳 `users.dailyAllowance`、admin 待審清單分辨兩種 kind 與按類型全選、home 的簽到卡（§9.6） | 三項全勾＋拍照才送得出；同一天送第二次回 `already-claimed`；媽媽（或代理）確認後 20 元進活期；**禮拜二送出、禮拜天才批，memo 仍寫「每日簽到（9/15）」且照樣入帳** |
+
+> ⚙️ **M7 幾乎不需要新機具。** 照片、`clientId` 冪等、台北日界線（`chorePeriodKey`）、
+> `admin_decide` 的核准者與代理規則，M5／M6 全部做完了——
+> M7 就是「多一種 `kind`、多一個勾選 UI、金額改查 `users.dailyAllowance`」。
+> 所以順序是 **M4 → M5 → M6 → M7**；反過來先做 M7 會等於把 M6 的東西再做一次。
+> 唯一真正的新東西是**待審量級**（每週 21 筆，§9.4），那是 UI 問題不是後端問題。
 
 ### M6 的範圍變動（2026-09-18）
 
@@ -985,14 +1307,36 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 三個新欄位要進 `Setup.gs` 的 `SCHEMA` 與 `CONFIG_SEED`，
 `setup()` 可重複執行、只補表頭，**既有資料不會動**（舊列這三欄留空即可）。
 
+### M7 帶進來的 schema 異動（2026-09-18）
+
+改 `Setup.gs` 時三件事一起做，**順序與位置都不能隨便**：
+
+1. **`SCHEMA.users` 的第 5 欄原位改名**：`weeklyAllowance` → `dailyAllowance`。
+   **位置不動**（還是第 5 欄）。`setup()` 只重寫表頭那一列，所以原位改名安全；
+   刪掉再接到最後面則會讓既有三列錯位。
+   `upsertUser()` 的第六個參數與 `seedUsers()` 的註解跟著改名，數值仍是 `20`。
+2. **`SCHEMA.requests` 最後面接一欄 `checklist`**（接在 `decidedProxy` 之後），
+   理由與 `photoFileId` 那三欄相同——插在中間會讓既有每一列默默錯位一格（§5）。
+3. **`CONFIG_SEED`**：刪掉 `allowance_weekday` 與 `allowance_hour` 兩列，
+   新增 `['daily_checklist', '好好照顧自己|尊重別人的需求|完成自己的工作', '每日簽到的自我檢核項目，| 分隔']`。
+   `seedTable()` 以第一欄為鍵、已存在的鍵不動，所以**新增那列會補進去、刪掉的那兩列不會自動消失**——
+   線上 `config` 分頁的舊兩列要**手動刪**（留著也沒人讀，只是會誤導）。
+
+⚠️ **另外要手動做的一件事**：線上 `users` 分頁那三格的值是舊的（每週制的殘留），
+**必須手動改成 20**，不要為此重跑 `seedUsers()`（會洗掉密碼，見 §5）。
+
 ### 待處理的程式碼異動
 
-- ✅ **`apps-script/Setup.gs` 的 `seedUsers()` 已改成三人一律 `20`**，與 §5 一致，程式碼端沒有待辦了。
-  但這只影響「從零建帳號」那一次：**線上 `users` 分頁的三列目前仍是 50，還沒改**，
+- 🔴 **`SCHEMA.users` 的 `weeklyAllowance` 要原位改名成 `dailyAllowance`**，
+  `SCHEMA.requests` 要在最後補 `checklist`，`CONFIG_SEED` 要刪兩列、加 `daily_checklist`——
+  三件事的細節見上面「M7 帶進來的 schema 異動」。
+- ✅ **`seedUsers()` 的三個數值仍是 `20`，不用改**（改的是欄位名與語意：每週 → 每天）。
+  但它只影響「從零建帳號」那一次：**線上 `users` 分頁那三格是舊值，還沒改成 20**，
   正確做法是**直接在 Sheet 改那一欄**，**不要重跑 `seedUsers()`**
   （`upsertUser()` 會重產 salt 與密碼雜湊，把密碼洗掉）。
-  `CONFIG_SEED` 也確認過沒有零用錢相關的 key——**不該有**，
-  零用錢金額逐人設定，不在 `config`（§5）。
+- ❌ **每週零用錢的 time-driven trigger 不用寫了**（原本掛在 M3）。
+  若之前已經在 Apps Script 專案裡建過這支 trigger，**要去「觸發條件」頁面手動刪掉**——
+  程式碼刪了，trigger 還在的話會每週日 8:00 噴一次執行失敗信。
 
 **M1 現況（2026-09-18）**：程式碼已完成，只剩把 Apps Script 部署成 Web App、
 把 `/exec` 網址填進 `js/config.js` 的 `apiUrl`（步驟見 [docs/DEPLOY.md](docs/DEPLOY.md)）。
@@ -1001,15 +1345,25 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
   `admin_adjust` · `admin_gift` · `admin_recalc` · `change_password`，
   加上 script lock、`clientId` 冪等、首次登入自動開 `current` / `gift` 帳戶。
 - 前端已實作：登入頁（8 位數字鍵盤）、**餘額頁**（帳戶卡 + 總資產 + 離線快取）。
-- **尚未實作**：M3 的兩個 time-driven trigger（每週零用錢＝週日早上 8:00、每月計息），
+- **尚未實作**：M3 的 time-driven trigger（**每月計息**；每週零用錢那支已取消，見 §9.6），
   以及 §7.2 的 `transfer` · `request` · `cancel_request` · `open_account` ·
-  `admin_decide` · `admin_config` · `admin_revoke_session`，
-  以及 M6 的照片子系統（Drive 建檔、`photoFileId`、`chore_photo` 取圖、代理確認）。
+  `admin_decide` · `admin_config` · `admin_set_allowance` · `admin_revoke_session`，
+  M6 的照片子系統（Drive 建檔、`photoFileId`、`chore_photo` 取圖、代理確認），
+  以及 M7 的每日簽到（`request(allowance_claim)`、daily view、`config.daily_checklist`）。
 - 前端的邏輯 401 處理（收到 `error:'unauthorized'` 就清 session 導回登入頁，§7.4）已接上，
   快照快取也改成每人一個 key，避免共用平板上看到前一個人的餘額。
 
 M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持續打開的理由。
 審核與家事是家長端的管理需求，可以晚一點。
+
+> ⚠️ **但零用錢改成每日簽到之後，這個排序有一個代價要先知道：M7 上線之前，
+> 小孩的活期沒有任何一條自動收入。** 舊設計至少每週日會自動進 20 元，
+> 現在那支 trigger 沒了、而 M7 排在最後——中間這段期間只能靠家長用
+> `admin_adjust` 手動補（M1 已經有這支）。這不是設計缺陷，是排程的副作用，
+> 但**不要讓小孩在這段期間打開一個永遠 0 元的 app**：
+> 要嘛家長天天用 `admin_adjust` 手動補，要嘛把 **M6 + M7 一起往前拉**。
+> **不能只把 M7 抽出來提前**——它的照片流程整包來自 M6（§7.5、§7.6），
+> 抽掉 M6 就等於要在 M7 裡把同樣的東西再寫一次。
 但 §9.3 的定存確認頁屬於 M2，不能延後——沒有它，免審的定存會變成客訴來源。
 
 ---
@@ -1056,8 +1410,35 @@ M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持�
       **改設定不會讓過去那些代理紀錄變成非代理**
 - [ ] 期數選擇器只給得出 3～12 個月；`open_account` 對期數小於 3 或大於 12 的請求一律拒絕，
       **即使繞過 UI 手動組請求送出也擋得住**
-- [ ] 每週零用錢依各小孩的 `users.weeklyAllowance` 於**週日早上 8:00** 發放（目前三人都是 20），金額可以人人不同
-- [ ] 週日發完零用錢後，家長端 admin 首頁看得到「本週待審 ○ 件」提醒
+- [ ] **每日簽到：三項全勾才送得出**——少勾一項送出鍵是灰的；
+      **手工組一個只勾兩項的請求送出去，伺服器回 `checklist-incomplete`**
+- [ ] **每日簽到沒拍照就不能送出**：送出鍵是灰的；手工組沒有 `photo` 的請求回 `photo-required`
+- [ ] 三個勾選項目的**文字與數量來自 `config.daily_checklist`**，不是寫死的：
+      把該格改成四項，daily view 立刻變成四個框，**且只勾三項會被伺服器擋下**（不用改程式、不用重新部署）
+- [ ] 把 `config.daily_checklist` 清空 → `request(allowance_claim)` 回 `server`，
+      **不會變成「不用勾也能領」**
+- [ ] **同一天送第二次被擋掉**，回 `already-claimed`；**繞過 UI 手工組請求也擋得住**
+      （日界線以 `Asia/Taipei` 00:00 計，跨午夜才算新的一天）
+- [ ] 每日簽到被退回或自己撤回後**當天可以重送**；**跨過午夜就重送不了「昨天」那一筆**
+- [ ] 核准後 **20 元進活期主帳戶**，金額來自 `users.dailyAllowance`——
+      **前端把 amount 改成 200 送出也沒用**；把某個小孩的金額改成 30，只有他變 30
+- [ ] `users.dailyAllowance` 沒設定或為 0 時核准 → 回 `zero-amount`，**不寫 ledger、該筆維持 pending**
+- [ ] **禮拜二送出、媽媽禮拜天才批 → 照樣入帳 20 元**，ledger 的 `ts` 是禮拜天、
+      但 memo 寫「每日簽到（9/15）」；**pending 不會因為過了那天就作廢**
+- [ ] 「沒領到」只在「那天根本沒送出」時發生——**沒有任何補領的路**
+- [ ] 每日簽到的核准者規則與家事相同：**Vicky 直接核准；Aug 先被擋下出現「代替確認」，再按一次才成立**，
+      `decidedProxy = true` 且 memo 看得出是代的
+- [ ] 家長端待審清單**分得出兩種 kind**：每日簽到那筆看得到攤開的三個勾選項目與照片，
+      家事那筆看得到家事名稱；**「全部核准今天的每日簽到」一次批掉三筆**
+- [ ] 每日簽到的照片進同一個 `HappyBank 家事照片/<kidId>/`，檔名是 `<yyyyMMdd>-allowance-<clientId 前8>.jpg`；
+      飛航模式送出後復網補送，**Drive 裡只有一張、只入帳一次**
+- [ ] 離線時每日簽到頁**明白寫出「會算在真正送出去的那一天」**，不是靜靜丟進佇列
+- [ ] **裝置時間調成昨天也不能多領一次**（日界線一律以伺服器的 `Asia/Taipei` 為準）
+- [ ] 家長端 admin 改得動 `users.dailyAllowance`（逐人）與 `config.daily_checklist`
+- [ ] **沒有任何自動發零用錢的行為**：週日早上 8:00 不會有錢自動進帳，
+      Apps Script 的觸發條件頁面沒有那支 trigger
+- [ ] 週日早上家長端 admin 首頁看得到「本週待審 ○ 件」提醒（對帳日保留，但與發薪無關）；
+      **一次面對 21 筆每日簽到 + 家事，清單不會卡住**（照片延遲載入）
 - [ ] 跨月結算：活期與定存各自依正確利率複利
 - [ ] 定存到期 → 停止計息 + 首頁提醒
 - [ ] 飛航模式送出轉帳 → 復網自動補送，**且只入帳一次**
