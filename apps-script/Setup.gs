@@ -2,7 +2,7 @@
 // 在 Apps Script 編輯器選 setup 執行一次，會建好所有分頁、表頭與種子資料。
 // 重複執行是安全的：已存在的分頁只補表頭，不動既有資料。
 
-const SHEET_ID = '1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo'; // HappyBank 資料庫
+// SHEET_ID 宣告在 Config.gs（同專案共用全域範圍）
 
 // 唯一的 schema 定義來源。改欄位改這裡，再跑一次 setup。
 const SCHEMA = {
@@ -95,22 +95,8 @@ function seedTable(sh, seed) {
   }
 }
 
-// --- 密碼 ---------------------------------------------------------------
-// Apps Script 沒有 bcrypt，用加鹽 SHA-256 迭代。Sheet 本身是 private，
-// 這道防線擋的是「小孩翻到表看到明文密碼」，不是擋外部攻擊者離線破解。
-
-function hashPassword(password, salt, rounds) {
-  let acc = salt + ':' + password;
-  for (let i = 0; i < rounds; i++) {
-    acc = Utilities.base64Encode(
-      Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, acc, Utilities.Charset.UTF_8));
-  }
-  return acc;
-}
-
-function newSalt() {
-  return Utilities.getUuid().replace(/-/g, '').slice(0, 16);
-}
+// --- 帳號 ---------------------------------------------------------------
+// hashPassword / newSalt 定義在 Code.gs（執行時期登入也要用）。
 
 // 密碼格式檢查：小孩固定 N 位數字，家長至少 8 字元
 function assertPasswordOk(role, password) {
