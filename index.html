@@ -63,13 +63,11 @@
     <button class="btn-text" id="btn-switch">← 換一個人</button>
   </section>
 
-  <!-- 登入成功後的佔位頁（帳戶頁尚未實作，見 SPEC M1）-->
+  <!-- 餘額頁（SPEC M1）-->
   <section id="view-home" class="view hidden">
-    <div class="placeholder">
-      <div class="big">🎉</div>
-      <h2 id="home-hello"></h2>
-      <p>帳戶頁還在蓋。<br>下一步是 SPEC 的 M1：餘額與帳戶卡。</p>
-    </div>
+    <div id="home-banner" class="banner hidden"></div>
+    <div id="home-body"></div>
+    <p id="home-fresh" class="freshness"></p>
     <button class="btn-text" id="btn-logout">登出</button>
   </section>
 
@@ -80,6 +78,8 @@
   <script src="js/config.js"></script>
   <script src="js/api.js"></script>
   <script src="js/auth.js"></script>
+  <script src="js/money.js"></script>
+  <script src="js/home.js"></script>
   <script src="js/login.js"></script>
   <script src="js/version.js"></script>
 </body>

@@ -17,6 +17,8 @@
 Google Sheet「HappyBank 資料庫」 — [開啟](https://docs.google.com/spreadsheets/d/1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo/edit)
 （Sheet ID `1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`，擁有者 aug.chao@gmail.com，未分享）
 
+📘 **完整部署步驟（建表、建帳號、部署 Web App、疑難排解）見 [docs/DEPLOY.md](docs/DEPLOY.md)**
+
 初始化步驟：
 
 1. Sheet → 擴充功能 → Apps Script，貼上 `apps-script/Setup.gs`

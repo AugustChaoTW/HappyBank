@@ -159,8 +159,8 @@
   }
 
   function enterHome(user) {
-    el('home-hello').textContent = `${user.emoji} 哈囉，${user.displayName}！`;
     show('home');
+    Home.render(user);
   }
 
   el('btn-switch').addEventListener('click', () => {
