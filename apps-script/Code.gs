@@ -449,6 +449,9 @@ function apiSnapshot(p) {
     user: publicUser(user), kids,
     // 家事的指定核准者放頂層，admin 才知道自己按下去是正式確認還是代理（SPEC §7.1、§9.5）
     chore_approver: String(getConfigValue('chore_approver') || ''),
+    // 待審清單要顯示家事名稱與獎金。不帶 chores 的話前端只能靠寫死的對照表猜，
+    // 家長一改標題或金額，清單就會顯示舊的。
+    chores: readTable('chores').map(stripRow),
     // requests 帶 photoFileId，但絕不夾帶照片內容——十筆待審全塞 base64
     // 會讓登入變成十秒，縮圖一律走 chore_photo 延遲抓（SPEC §7.6）
     requests: readTable('requests').filter(r => r.status === 'pending').map(stripRow),

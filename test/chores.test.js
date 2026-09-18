@@ -730,3 +730,19 @@ test('家長 snapshot 帶 chore_approver 與 photoFileId，但不夾帶照片內
   assert.strictEqual(String(r.photoFileId), String(req.photoFileId));
   assert.ok(JSON.stringify(snap).length < 20000, 'snapshot 絕對不能夾帶 base64 照片');
 });
+
+test('家長快照要帶 chores，待審清單才不會顯示過期的家事名稱與金額', () => {
+  const gs = freshBank();
+  const parent = login(gs, 'vicky');
+
+  // 家長改了家事的標題與獎金
+  const row = gs.$.rows('chores').find(c => c.id === 'chore-trash')._row;
+  gs.$.setCell('chores', row, 'title', '倒廚餘');
+  gs.$.setCell('chores', row, 'reward', 25);
+
+  const snap = gs.$.call({ action: 'snapshot', session: parent });
+  assert.ok(Array.isArray(snap.chores), '家長快照要有 chores');
+  const trash = snap.chores.find(c => c.id === 'chore-trash');
+  assert.strictEqual(trash.title, '倒廚餘');
+  assert.strictEqual(trash.reward, 25);
+});
