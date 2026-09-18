@@ -136,8 +136,19 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 
 ### `credentials`（密碼獨立分頁）
 
-**密碼與個資分開放。** 這張表由 `setup()` 自動**隱藏並加上保護**（只有擁有者可編輯），
-如此一來就算之後把 Sheet 分享給小孩或其他家人看帳，也碰不到任何人的密碼雜湊。
+**密碼與個資分開放。** 這張表由 `setup()` 自動**隱藏並加上保護**（只有擁有者可編輯）。
+
+> ⚠️ **不要把這個 Sheet 分享給任何人。**
+> Google Sheets 的「保護」只限制**編輯**，不限制**讀取**。任何被分享到這份試算表的人——
+> 就算只給「檢視者」——都可以透過 檔案 → 建立副本、檔案 → 下載，或 Sheets API
+> 把隱藏且受保護的 `credentials` 分頁整份讀出來。
+> 而小孩密碼是 8 位數字，雜湊是加鹽 SHA-256 迭代（見 §8.1）；
+> 拿到副本的人可以在自己電腦上離線窮舉，幾秒鐘就能還原出兄弟姐妹的密碼。
+> **隱藏 + 保護擋的是誤改與隨手亂看，擋不住有心的讀者。**
+> 若真的需要讓家人看帳，正確做法是兩條路之一：
+> （a）給對方一個 `role = parent` 的帳號，走 app 的**家長模式**看；
+> （b）把 `credentials` 搬到另一份**完全不分享**的試算表，本表只留非機密欄位。
+> 在（b）做完之前，這份 Sheet 一律只有擁有者能存取。
 
 | 欄位 | 型別 | 說明 |
 |---|---|---|
@@ -281,23 +292,48 @@ data/
 |---|---|---|
 | `login` | userId, password | `{ ok, session, expiresTs, user }` |
 | `logout` | session | `{ ok }` |
-| `whoami` | session | `{ ok, user }`；session 過期回 `401` |
+| `whoami` | session | `{ ok, user }`；session 過期回邏輯 401（見 §7.4） |
 
 登入失敗遞增 `failedCount`；達 `login_max_fail` 寫入 `lockedUntil`，鎖定期間一律拒絕。
 **錯誤訊息不得區分「帳號不存在」與「密碼錯誤」。**
 
 ### 7.1 `GET ?action=snapshot&token=…&session=…`
 
-一次回傳該小孩畫面所需的全部資料，減少往返：
+一次回傳該畫面所需的全部資料，減少往返。**身分一律以 session 判定，不接受前端指定 kidId**
+（否則 Momo 改個參數就能看 Coco 的帳）。回傳形狀依 `role` 而不同：
+
+`role = kid`：
 
 ```json
-{ "ok": true, "serverTs": "...", "kid": {...}, "accounts": [...],
-  "ledger": [ /* 最近 50 筆 */ ], "requests": [ /* pending */ ],
-  "chores": [...], "rates": {...} }
+{ "ok": true, "serverTs": "...", "rates": { "current": 0.05, "term": 0.1, "goal": 0.05, "gift": 0 },
+  "user": { "userId": "momo", "role": "kid", "displayName": "Momo", "emoji": "👧" },
+  "accounts": [ { "accountId": "...", "type": "current", "name": "...", "emoji": "💰",
+                  "rateMonthly": 0.05, "lockUntil": null, "targetAmount": null,
+                  "balance": 0, "status": "active" } ],
+  "ledger":   [ /* 自己的最近 50 筆，新到舊 */ ],
+  "requests": [ /* 自己的 pending */ ],
+  "chores":   [ /* active 且屬於自己或公開的家事 */ ] }
 ```
 
-`role = parent` 的 session 額外回傳全部小孩 + 所有 pending requests。回傳的 `kid` 一律以 session 判定，
-**不接受前端指定 kidId**（否則 Momo 改個參數就能看 Coco 的帳）。
+`role = parent`：
+
+```json
+{ "ok": true, "serverTs": "...", "rates": {...},
+  "user": { /* 家長自己 */ },
+  "kids": [ { "user": {...}, "accounts": [...], "total": 1234 } ],
+  "requests": [ /* 全家所有 pending */ ],
+  "ledger":   [ /* 全家最近 50 筆，新到舊 */ ] }
+```
+
+欄位約定（前端就是照這些寫的）：
+
+- 登入者一律放在 **`user`**（不是 `kid`）；家長的小孩清單放在 `kids`，
+  每個元素是 `{ user, accounts, total }`，`total` 是該小孩所有未關閉帳戶餘額加總。
+- `ledger` **新到舊**（newest-first），取最近 50 筆；小孩只看得到自己的。
+- `rateMonthly` 是**小數**（5% = `0.05`），不是百分比數字。
+- `lockUntil` 是 ISO 字串或 `null`；`targetAmount` 是整數或 `null`（沒設就是 `null`，不是 0）。
+- `balance` 是整數元。家長端沒有 `chores`；小孩端沒有 `kids`。
+- 小孩 session 打 snapshot 時，若活期／紅包帳戶還不存在會自動補建。
 
 ### 7.2 `POST`（body JSON）
 
@@ -325,6 +361,27 @@ data/
   Apps Script 沒有交易，兩台手機同時送會算錯 `balanceAfter`。
 - 每次寫入後重算並回寫 `accounts.balance`；提供 `admin_recalc` 從 ledger 全量重建校驗。
 
+### 7.4 回應格式與「邏輯 401」
+
+Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正的 401/403/500。
+所以這套 API 的錯誤一律是 **HTTP 200 + body 裡的 `ok:false`**：
+
+```json
+{ "ok": false, "error": "unauthorized", "message": "登入過期了，請重新登入。" }
+```
+
+| `error` | 意義 | 前端該做什麼 |
+|---|---|---|
+| `bad-token` | 共享密鑰不對 | 設定錯誤，檢查 `js/config.js` 與 `Config.gs` |
+| `unauthorized` | **邏輯 401**：沒帶 session、session 不存在、已過期、找不到帳號，或小孩打 `admin_*` | **清掉本機 session，導回登入頁**，並顯示 `message` |
+| `bad-credentials` | 帳號或密碼不對（不區分哪一個） | 留在登入頁，顯示 `message` |
+| `locked` | 連錯太多次被鎖 | 顯示還要等幾分鐘 |
+| `busy` | `LockService` 等 15 秒仍拿不到鎖（多人同時寫入） | 不是失敗也不是成功，**請使用者過幾秒重試**；不要清 session |
+| `bad-json` / `unknown-action` / `server` | 請求格式錯、action 不認得、伺服器例外 | 顯示 `message`，視為暫時性錯誤 |
+
+> 「401」在本專案一律指這個 `error: 'unauthorized'` 的 200 回應，不是 HTTP 狀態碼。
+> 文件與程式碼裡寫「回 401」時都是這個意思。
+
 ---
 
 ## 8. 安全
@@ -340,9 +397,15 @@ data/
    這道防線擋的是「小孩翻開 Sheet 看到明文密碼」，不是擋外部攻擊者離線暴力破解——
    對家用場景足夠，但**不要重用家裡其他地方的密碼**。
 3. **session token 由伺服器產生**，存 `sessions` 分頁；前端放 localStorage。
-   過期或被踢掉 → API 回 `401` → 前端清除並導回登入頁。
+   過期或被踢掉 → API 回邏輯 401（`ok:false, error:'unauthorized'`，見 §7.4）
+   → 前端清除 session 並導回登入頁。
 4. **密碼放在獨立的 `credentials` 分頁**，由 `setup()` 隱藏並設保護（僅擁有者可編輯）。
-   `users` 分頁只有暱稱、角色、零用錢等非機密欄位，可以安心分享。
+   保護只擋**編輯**，不擋**讀取**：被分享到這份 Sheet 的人（哪怕只是檢視者）
+   都能用 建立副本／下載／Sheets API 讀走隱藏分頁，再離線爆破 8 位數字密碼。
+   因此**不要把這個 Sheet 分享給任何人**——家人要看帳就發一個 `role = parent` 帳號走家長模式，
+   或先把 `credentials` 移到另一份不分享的試算表（見 §5 與 §10）。
+   分頁分開放的實際好處是：`users` / `ledger` 這些表被誤操作時不會波及密碼，
+   以及未來真的要分享時只需搬一張表。
 5. 登入失敗 5 次鎖 15 分鐘，記在 `credentials.lockedUntil`。
 6. 沒有「家長 PIN」了——家長就是一個 `role = parent` 的帳號，權限一律由伺服器依 session 判定。
 2. **另開一支獨立的 Apps Script 專案 + 另一組 token。**
@@ -455,3 +518,7 @@ M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持�
 - [ ] session 過期後自動導回登入頁，不會卡在空白畫面
 - [ ] 家長可在 admin 踢掉某台裝置，該裝置下次操作即失效
 - [ ] 兩台手機同時操作同一帳戶，餘額不會算錯
+- [ ] session 被踢掉後的第一個動作：畫面立刻回到選頭像，並顯示伺服器給的「登入過期了，請重新登入」
+- [ ] 上述情況下不會再繼續顯示舊快照，也不會跳出未處理的錯誤
+- [ ] Momo 被踢掉／登出後換 Coco 登入，同一台平板看不到 Momo 的餘額（快照快取分人存）
+- [ ] 伺服器忙碌（script lock 逾時）時，登入頁與首頁顯示「銀行有點忙」而不是「帳號或密碼不對」

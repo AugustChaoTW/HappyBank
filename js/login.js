@@ -10,6 +10,7 @@
   const dotsWrap = el('dots');
   const msgKid = el('msg-kid');
   const msgParent = el('msg-parent');
+  const msgPick = el('msg-pick');
   const pwInput = el('pw-input');
 
   let current = null;   // 目前選到的 user
@@ -51,7 +52,13 @@
     }
   }
 
+  function setPickMsg(text) {
+    msgPick.textContent = text || '';
+    msgPick.classList.toggle('hidden', !text);
+  }
+
   function pickUser(u) {
+    setPickMsg('');
     current = u;
     entered = '';
     el('pw-face').textContent = u.emoji;
@@ -151,6 +158,14 @@
 
     if (res.ok) return enterHome(res.user);
 
+    // 伺服器搶不到 script lock：這不是密碼錯，別讓小孩以為自己打錯，所以不抖動
+    if (res.error === 'busy') {
+      entered = '';
+      renderDots();
+      if (current.role === 'parent') pwInput.value = '';
+      return setMsg(node, res.message || '銀行現在有點忙，等一下再試一次。', 'error');
+    }
+
     // 訊息一律不區分「帳號不存在」與「密碼錯誤」（SPEC §7.0）
     const text = res.error === 'no-backend'
       ? '後端還沒部署，登入功能等 M1 上線。'
@@ -164,12 +179,27 @@
   }
 
   el('btn-switch').addEventListener('click', () => {
+    setPickMsg('');
     current = null; entered = '';
     show('pick');
   });
 
+  // session 過期或被家長踢掉：api.js 清掉 session 後發這個事件，這裡只負責把人帶回選頭像。
+  // 處理過程不打任何 API，所以就算是登入途中發生也不會再觸發自己（登入本身也不帶 session）。
+  window.addEventListener('hb-unauthorized', e => {
+    busy = false;
+    current = null;
+    entered = '';
+    renderDots();
+    pwInput.value = '';
+    pwInput.type = 'password';
+    show('pick');
+    setPickMsg((e.detail && e.detail.message) || '登入過期了，請重新登入。');
+  });
+
   el('btn-logout').addEventListener('click', async () => {
     await Auth.logout();
+    setPickMsg('');
     current = null; entered = '';
     show('pick');
   });

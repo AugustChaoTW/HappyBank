@@ -1,7 +1,9 @@
 // 餘額頁：總資產、四種帳戶卡、最近交易。
 // 帳本的真實來源在伺服器，localStorage 只是離線快照，所以畫面一定要標「更新於 ○○」（SPEC §1）。
 const Home = (() => {
-  const CACHE_KEY = 'happybank-snapshot';
+  // 快照一定要分人存：共用平板上 Momo 登出、Coco 登入，絕不能看到上一個人的餘額
+  const CACHE_PREFIX = 'happybank-snapshot:';
+  const LEGACY_CACHE_KEY = 'happybank-snapshot';   // 舊版不分人的 key，載入時順手清掉
   const el = id => document.getElementById(id);
 
   // 卡片順序 = 想教的順序：能用的錢 → 不會長大的錢 → 鎖起來的錢 → 有目標的錢
@@ -17,11 +19,23 @@ const Home = (() => {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g,
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  function loadCache() {
-    try { return JSON.parse(localStorage.getItem(CACHE_KEY)); } catch { return null; }
+  try { localStorage.removeItem(LEGACY_CACHE_KEY); } catch { /* 無痕模式就算了 */ }
+
+  // 沒有 userId 就不留快照，寧可每次重抓，也不要存成一份大家共用的
+  function cacheKey(u) {
+    return u && u.userId ? CACHE_PREFIX + u.userId : null;
   }
-  function saveCache(snap) {
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify(snap)); } catch { /* 無痕模式就算了 */ }
+  function loadCache(key) {
+    if (!key) return null;
+    try { return JSON.parse(localStorage.getItem(key)); } catch { return null; }
+  }
+  function saveCache(key, snap) {
+    if (!key) return;
+    try { localStorage.setItem(key, JSON.stringify(snap)); } catch { /* 無痕模式就算了 */ }
+  }
+  function dropCache(key) {
+    if (!key) return;
+    try { localStorage.removeItem(key); } catch { /* 無痕模式就算了 */ }
   }
 
   // 後端還沒部署時也要看得到版面，但必須明白標示不是真的錢
@@ -166,7 +180,8 @@ const Home = (() => {
     }
 
     // 先畫快取，讓小孩一開 app 就看得到數字，網路回來再覆蓋
-    const cached = loadCache();
+    const key = cacheKey(u);
+    const cached = loadCache(key);
     if (cached) { showBanner(''); paint(cached, '離線快取'); }
 
     let res;
@@ -178,13 +193,41 @@ const Home = (() => {
     }
 
     if (res && res.ok) {
-      saveCache(res);
+      saveCache(key, res);
       showBanner('');
       paint(res);
       return;
     }
 
+    // session 被踢掉或過期：api.js 已經發了 hb-unauthorized，login.js 會把人帶回選頭像。
+    // 這裡負責把畫面與快照清乾淨，不然下一個登入的人會先看到這個人的數字。
+    if (res && res.error === 'unauthorized') {
+      dropCache(key);
+      showBanner('');
+      el('home-fresh').textContent = '';
+      el('home-body').innerHTML = '';
+      return;
+    }
+
+    // 伺服器忙不過來（script lock 等太久）也要照實講，不要混進「連不上」
+    if (res && res.error === 'busy' && !cached) {
+      showBanner('');
+      el('home-fresh').textContent = '';
+      el('home-body').innerHTML = `
+        <div class="placeholder">
+          <div class="big">⏳</div>
+          <h2>銀行有點忙</h2>
+          <p>${esc(res.message || '等一下再試一次。')}</p>
+        </div>`;
+      return;
+    }
+
     if (cached) {
+      if (res && res.error === 'busy') {
+        showBanner(res.message || '銀行有點忙，先看上次的資料');
+        paint(cached, '離線快取');
+        return;
+      }
       showBanner('連不上銀行，先看上次的資料');
       paint(cached, '離線快取');
     } else {

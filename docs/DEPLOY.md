@@ -27,35 +27,36 @@
 
 ---
 
-## 2. 貼上 Setup.gs 與 Code.gs
+## 2. 貼上 Config.gs、Code.gs 與 Setup.gs
 
-專案裡要有**兩個** `.gs` 檔案，檔名與 repo 一致：
+專案裡要有**三個** `.gs` 檔案，檔名與 repo 一致：
 
 | 檔案 | 用途 | 執行時機 |
 |---|---|---|
-| `Setup.gs` | 建分頁、寫 config 種子、密碼雜湊函式（`hashPassword` / `newSalt`）、建帳號（`upsertUser` / `seedUsers`） | `setup()` 與 `seedUsers()` **只在編輯器裡手動跑**，正常情況各跑一次 |
-| `Code.gs` | Web App 本體：`doGet` / `doPost` / 登入 / snapshot / 家長操作 | 每次前端打 API 時由 Google 自己執行，**不要手動跑** |
+| `Config.gs` | 專案共用常數：`SHEET_ID` 與 `TOKEN`。整個專案**只有這裡宣告一次** | 沒有函式，不會被執行；`Code.gs` 與 `Setup.gs` 都讀它 |
+| `Code.gs` | Web App 本體：`doGet` / `doPost` / 登入 / snapshot / 家長操作 / 密碼雜湊（`hashPassword` / `newSalt`） | 每次前端打 API 時由 Google 自己執行，**不要手動跑** |
+| `Setup.gs` | 建分頁（`SCHEMA`）、寫 config 與家事種子、建帳號（`upsertUser` / `seedUsers`） | `setup()` 與 `seedUsers()` **只在編輯器裡手動跑**，正常情況各跑一次 |
 
-> **為什麼要分兩個檔？** 兩件事的生命週期不同：`Setup.gs` 是一次性的建置工具，
-> `Code.gs` 是長期對外服務的端點。分開之後，之後改 API 邏輯不會動到建表與建帳號的程式碼。
-> 但**兩個檔都必須留在同一個 Apps Script 專案裡**——`Code.gs` 的登入驗證會呼叫
-> `Setup.gs` 定義的 `hashPassword()` 與 `newSalt()`，刪掉 `Setup.gs` 登入就會壞掉。
+> **為什麼要分三個檔？** Apps Script 把同一專案的所有 `.gs` 併成**同一個全域範圍**，
+> 所以同一個 `const` 只能宣告一次——`SHEET_ID` 與 `TOKEN` 因此獨立成 `Config.gs`，
+> 兩邊共用，改值只要改一個地方。
+> `Code.gs` 與 `Setup.gs` 則是生命週期不同的兩件事：前者是長期對外服務的端點，
+> 後者是一次性的建置工具，之後改 API 邏輯不會動到建表與建帳號的程式碼。
+> **三個檔都必須留在同一個 Apps Script 專案裡**——`Setup.gs` 的 `upsertUser()` 會呼叫
+> `Code.gs` 定義的 `hashPassword()` 與 `newSalt()`（登入驗證也用同一組函式），
+> 而兩者都靠 `Config.gs` 的 `SHEET_ID`。
 
 做法：
 
 1. 點左邊檔案列的 `Code.gs`，全選（Cmd+A）刪掉，貼上 repo 裡 `apps-script/Code.gs` 的完整內容。
-2. 點檔案列右上的 **＋ → 指令碼（Script）**，命名為 `Setup`（Apps Script 會自動補 `.gs`）。
-   把預設內容刪掉，貼上 repo 裡 `apps-script/Setup.gs` 的完整內容。
-3. 按 **💾 儲存專案**（Cmd+S）。
+2. 點檔案列右上的 **＋ → 指令碼（Script）**，命名為 `Config`（Apps Script 會自動補 `.gs`）。
+   把預設內容刪掉，貼上 repo 裡 `apps-script/Config.gs` 的完整內容。
+3. 同樣方式再新增一個 `Setup`，貼上 repo 裡 `apps-script/Setup.gs` 的完整內容。
+4. 按 **💾 儲存專案**（Cmd+S）。
 
-> ⚠️ **已知衝突：`SHEET_ID` 重複宣告。**
-> `Code.gs` 與 `Setup.gs` 檔頭都有一行 `const SHEET_ID = '1Po7...';`。
-> Apps Script 把同一專案的所有 `.gs` 檔案併成同一個全域範圍，
-> 同一個 `const` 宣告兩次會在**執行任何函式時**直接噴
-> `SyntaxError: Identifier 'SHEET_ID' has already been declared`。
-> **處理方式**：把 `Code.gs` 裡那一行 `const SHEET_ID = ...` 刪掉（保留 `Setup.gs` 的那一行），
-> 再儲存。兩個檔共用同一個值，功能不受影響。
-> 若貼上後儲存與執行都正常、沒有出現這個錯誤，就不用動。
+> 📋 **三個檔都是原封不動整段貼上，不要手改任何一行。**
+> 編輯器裡的程式碼一旦與 repo 不同步，之後對照 repo 除錯就會失準。
+> 要改設定值（Sheet ID、token）請改 repo 裡的 `apps-script/Config.gs`，再重貼一次。
 
 ---
 
@@ -178,7 +179,7 @@ setup 完成：users, credentials, sessions, accounts, ledger, requests, chores,
    apiUrl: 'https://script.google.com/macros/s/AKfycb.../exec',
    ```
 
-2. 確認 `apiToken` 與 `Code.gs` 檔頭的 `TOKEN` **完全一樣**，目前兩邊都是：
+2. 確認 `apiToken` 與 `Config.gs` 裡的 `TOKEN` **完全一樣**，目前兩邊都是：
 
    ```
    hb-10c4cc80462d2b4c
@@ -213,7 +214,7 @@ setup 完成：users, credentials, sessions, accounts, ledger, requests, chores,
 {"ok":true,"users":[{"userId":"momo","role":"kid","displayName":"Momo","emoji":"👧"}, ...]}
 ```
 
-- 回 `{"ok":false,"error":"bad-token"}` → token 打錯，或 `Code.gs` 的 `TOKEN` 被改過。
+- 回 `{"ok":false,"error":"bad-token"}` → token 打錯，或 `Config.gs` 的 `TOKEN` 被改過。
 - 回 `{"ok":true,"users":[]}` → `users` 分頁是空的，回去做 §4。
 - 出現 Google 的登入頁或「很抱歉，發生暫時性錯誤」→ 部署的存取權限不是「任何人」，重做 §5。
 
@@ -243,7 +244,7 @@ setup 完成：users, credentials, sessions, accounts, ledger, requests, chores,
 Apps Script 的 Web App 網址對應的是一個**凍結的版本快照**，不是你編輯器裡的當前程式碼。
 在編輯器按 Cmd+S 只是存檔，`/exec` 那個網址跑的**還是舊版**，可以這樣放著好幾天都不變。
 
-改完 `Code.gs`（或 `Setup.gs` 裡被 `Code.gs` 呼叫的函式）之後：
+改完 `Code.gs`（或 `Config.gs`、`Setup.gs` 裡被 `Code.gs` 用到的東西）之後：
 
 1. Cmd+S 儲存。
 2. 右上角 **部署 / Deploy → 管理部署作業 / Manage deployments**。
@@ -264,9 +265,8 @@ Apps Script 的 Web App 網址對應的是一個**凍結的版本快照**，不�
 
 | 症狀 / 錯誤訊息 | 原因 | 處理 |
 |---|---|---|
-| `{"ok":false,"error":"bad-token"}` | `js/config.js` 的 `apiToken` ≠ `Code.gs` 的 `TOKEN` | 兩邊都對成 `hb-10c4cc80462d2b4c`，改了 `Code.gs` 要重新部署（§8） |
+| `{"ok":false,"error":"bad-token"}` | `js/config.js` 的 `apiToken` ≠ `Config.gs` 的 `TOKEN` | 兩邊都對成 `hb-10c4cc80462d2b4c`，改了 `Config.gs` 要重新部署（§8） |
 | `{"ok":false,"error":"server","message":"找不到分頁 xxx，請先執行 Setup.gs 的 setup()"}` | 分頁沒建好，或有人手動改了分頁名稱 | 回 §3 執行 `setup()`。分頁名稱必須全小寫英文，`ledger` 不能改成「帳本」 |
-| `SyntaxError: Identifier 'SHEET_ID' has already been declared` | `Code.gs` 與 `Setup.gs` 都宣告了 `const SHEET_ID` | 刪掉 `Code.gs` 那一行，保留 `Setup.gs` 的（見 §2 警告框） |
 | Console 出現 `Access to fetch ... blocked by CORS policy` | 通常**不是**真的 CORS：Apps Script 回 302 轉址到登入頁時瀏覽器會報成 CORS | 檢查部署的「誰可以存取」是不是「任何人」，以及網址是不是 `/exec` 結尾（不是 `/dev`） |
 | 前端顯示「後端尚未部署（SPEC M1）」 | `js/config.js` 的 `apiUrl` 還是空字串 | 做 §6，並確認已 push、Pages 已更新、瀏覽器已強制重新整理 |
 | 執行 `setup()` 跳「需要授權」／`Exception: 您沒有呼叫 SpreadsheetApp.openById 的權限` | 沒授權，或登入的是非擁有者帳號 | 依 §3.1 走完授權；確認瀏覽器目前帳號是 Sheet 擁有者 |
@@ -298,8 +298,11 @@ Apps Script 的 Web App 網址對應的是一個**凍結的版本快照**，不�
 4. **Sheet 本身不要分享出去。** 擁有者 `aug.chao@gmail.com`，目前未分享，維持這樣。
    Web App 用「執行身分：我」代為讀寫，小孩不需要、也不該有 Sheet 的存取權。
 5. **`credentials` 分頁已隱藏並加保護**（僅擁有者可編輯），密碼只存加鹽 SHA-256 迭代 1000 次的雜湊，
-   不存明文。這道防線擋的是「小孩翻開 Sheet 看到明文密碼」，
-   **不是**擋外部攻擊者離線暴力破解——對家用場景夠用，但**絕不要重用家裡其他地方的密碼**。
+   不存明文。但要認清這道防線的極限：Google Sheets 的「保護」只擋**編輯**，不擋**讀取**——
+   任何拿得到這份 Sheet 的人（即使只有檢視權）都能用 檔案 → 建立副本 / 下載 或 Sheets API
+   把隱藏分頁整份讀走。隱藏 + 保護擋的是誤改與隨手亂看，擋不住存心要看的人，
+   更**不是**擋離線暴力破解（小孩的 8 位數字密碼被拷走後幾秒就能爆破）。
+   所以第 4 點的「Sheet 不要分享出去」是這一項成立的前提，而且**絕不要重用家裡其他地方的密碼**。
 6. **密碼絕不 commit。** repo 裡的 `seedUsers()` 永遠是 `CHANGE-ME`。
    真實密碼只在 Apps Script 編輯器裡出現幾分鐘，用完改回去。
 7. HappyBank 用的是**獨立的 Apps Script 專案與獨立 token**，
