@@ -39,7 +39,6 @@ const CONFIG_SEED = [
   ['rate_goal',           0.05,  '儲蓄目標月利率'],
   ['rate_gift',           0.00,  '阿公阿嬤紅包帳戶月利率'],
   ['allowance_weekday',   0,     '每週零用錢發放日（0=週日）'],
-  ['term_months_options', '1,3,6', '定存可選期數（月）'],
   ['approval_mode',       'tiered', '審核模式：分級（見 SPEC §9）'],
   ['kid_password_digits', 8,     '小孩密碼位數，固定數字'],
   ['session_days_kid',    30,    '小孩登入有效天數'],
