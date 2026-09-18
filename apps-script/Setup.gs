@@ -160,8 +160,8 @@ function getConfig(key) {
 // 執行前把下面的密碼改掉，執行後把密碼清回 CHANGE-ME 再 commit。
 function seedUsers() {
   upsertUser('momo',   'kid',    'Momo', '👧', 'CHANGE-ME', 20);
-  upsertUser('coco',   'kid',    'Coco', '👧', 'CHANGE-ME', 15);
-  upsertUser('dodo',   'kid',    'Dodo', '👦', 'CHANGE-ME', 10);
+  upsertUser('coco',   'kid',    'Coco', '👧', 'CHANGE-ME', 20);
+  upsertUser('dodo',   'kid',    'Dodo', '👦', 'CHANGE-ME', 20);
   upsertUser('aug',    'parent', 'Aug',   '🧑', 'CHANGE-ME', 0);
   upsertUser('vicky',  'parent', 'Vicky', '👩', 'CHANGE-ME', 0);
 }

@@ -30,6 +30,7 @@ node --test --watch 'test/**/*.test.js'                     # 邊寫邊跑
 | `ledger.test.js` | 冪等、餘額來源、餘額不足、`admin_recalc`（SPEC §7.3 / §3） |
 | `accounts.test.js` | 自動開戶不重複（SPEC §2） |
 | `authz.test.js` | 小孩打不到 `admin_*`、看不到別人的帳（SPEC §7.1 / §8） |
+| `chores.test.js` | 家事回報：照片、一天一次、代理確認、`chore_photo`（SPEC §7.2 / §7.5 / §7.6 / §9.5） |
 | `money.test.js` | `js/money.js` 的顯示算式 |
 
 ## 假的 Apps Script 環境怎麼運作
@@ -68,6 +69,26 @@ gs.$.lock.failWaitLock = true              // 模擬 LockService 15 秒逾時 �
 gs.$.logs                                  // Logger.log 收到的東西
 gs.$.plain(x)                              // 跨 realm 物件轉成純 host 物件
 ```
+
+### 假的 Drive
+
+`DriveApp` 也是假的（`getRootFolder` / `getFoldersByName` / `createFolder` / `createFile` /
+`getFileById` / `getBlob` / `setTrashed`），檔案就存在記憶體裡。測試可以用：
+
+```js
+gs.$.drive.folderAt('HappyBank 家事照片/momo')   // 依路徑找資料夾，沒有回 null
+gs.$.drive.fileById(id)                          // 找檔案（含已在垃圾桶的）
+gs.$.drive.destroy(id)                           // 徹底刪掉，模擬有人清空垃圾桶
+gs.$.drive.created                               // 建過的檔案清單（「只建一張照片」用）
+gs.$.drive.sharingCalls                          // 必須永遠是空的，見下
+```
+
+`setSharing` 有實作，但**只是把呼叫記下來**——SPEC §5 明寫這個專案刻意不分享家事照片，
+`chores.test.js` 就是拿 `sharingCalls` 為空來守住那句話。
+
+`Utilities.base64Decode` 對壞掉的字串會**丟例外**（跟 Apps Script 一樣，不是 Node 的寬鬆行為），
+`Utilities.formatDate` 真的照傳進去的 `timeZone` 算——一天一次的日界線是台北時間，
+假環境若拿 node 的本地時區充數，那幾條測試會隨著跑測試的人在哪個時區變色。
 
 ### 雜湊忠實度
 
