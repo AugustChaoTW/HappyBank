@@ -6,8 +6,10 @@ const SHEET_ID = '1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo'; // HappyBank �
 
 // 唯一的 schema 定義來源。改欄位改這裡，再跑一次 setup。
 const SCHEMA = {
-  users: ['userId', 'role', 'displayName', 'emoji', 'salt', 'passwordHash',
-          'weeklyAllowance', 'active', 'lastLoginTs', 'failedCount', 'lockedUntil'],
+  // 個資與密碼分開放：credentials 分頁會被隱藏並加保護，
+  // 這樣就算把 Sheet 分享給小孩看帳，也碰不到任何人的密碼雜湊。
+  users: ['userId', 'role', 'displayName', 'emoji', 'weeklyAllowance', 'active', 'lastLoginTs'],
+  credentials: ['userId', 'salt', 'passwordHash', 'failedCount', 'lockedUntil', 'updatedTs'],
   sessions: ['token', 'userId', 'createdTs', 'expiresTs', 'device'],
   accounts: ['accountId', 'kidId', 'type', 'name', 'emoji', 'rateMonthly',
              'lockUntil', 'targetAmount', 'balance', 'status', 'createdTs'],
@@ -57,11 +59,24 @@ function setup() {
     cfg.getRange(cfg.getLastRow() + 1, 1, toAdd.length, 3).setValues(toAdd);
   }
 
+  protectCredentials(ss);
+
   // 移掉預設空白分頁
   const blank = ss.getSheetByName('工作表1') || ss.getSheetByName('Sheet1');
   if (blank && ss.getSheets().length > 1) ss.deleteSheet(blank);
 
   Logger.log('setup 完成：' + Object.keys(SCHEMA).join(', '));
+}
+
+// credentials 分頁隱藏 + 只有擁有者能編輯
+function protectCredentials(ss) {
+  const sh = ss.getSheetByName('credentials');
+  sh.hideSheet();
+  const existing = sh.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+  const p = existing.length ? existing[0] : sh.protect();
+  p.setDescription('密碼雜湊，請勿手動編輯');
+  p.removeEditors(p.getEditors());
+  if (p.canDomainEdit()) p.setDomainEdit(false);
 }
 
 // --- 密碼 ---------------------------------------------------------------
@@ -101,22 +116,25 @@ function upsertUser(userId, role, displayName, emoji, password, weeklyAllowance)
   assertPasswordOk(role, password);
   userId = String(userId).trim().toLowerCase(); // 帳號一律小寫，登入時大小寫不敏感
   const ss = SpreadsheetApp.openById(SHEET_ID);
-  const sh = ss.getSheetByName('users');
   const rounds = Number(getConfig('pbkdf_rounds')) || 1000;
   const salt = newSalt();
-  const row = [userId, role, displayName, emoji, salt, hashPassword(password, salt, rounds),
-               weeklyAllowance || 0, true, '', 0, ''];
 
+  upsertRow(ss.getSheetByName('users'),
+    [userId, role, displayName, emoji, weeklyAllowance || 0, true, '']);
+  upsertRow(ss.getSheetByName('credentials'),
+    [userId, salt, hashPassword(password, salt, rounds), 0, '', new Date()]);
+
+  Logger.log('user 已寫入：' + userId);
+}
+
+// 以第一欄（userId）為鍵 upsert 一列
+function upsertRow(sh, row) {
   const ids = sh.getLastRow() > 1
     ? sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().map(r => String(r[0]).toLowerCase())
     : [];
-  const idx = ids.indexOf(userId);
-  if (idx === -1) {
-    sh.appendRow(row);
-  } else {
-    sh.getRange(idx + 2, 1, 1, row.length).setValues([row]);
-  }
-  Logger.log('user 已寫入：' + userId);
+  const idx = ids.indexOf(String(row[0]).toLowerCase());
+  if (idx === -1) sh.appendRow(row);
+  else sh.getRange(idx + 2, 1, 1, row.length).setValues([row]);
 }
 
 function getConfig(key) {
