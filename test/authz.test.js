@@ -200,7 +200,9 @@ test('家長 snapshot 看得到全家，而且形狀符合 SPEC §7.1', () => {
   const snap = t.gs.$.call({ action: 'snapshot', session: t.aug });
   assert.strictEqual(snap.user.role, 'parent');
   assert.strictEqual(snap.accounts, undefined, '家長端沒有自己的 accounts');
-  assert.strictEqual(snap.chores, undefined, '家長端沒有 chores');
+  // 家長端「要」有 chores：待審清單得顯示家事名稱與獎金，
+  // 沒有的話前端只能靠寫死的對照表猜，家長一改標題就對不上。
+  assert.ok(Array.isArray(snap.chores), '家長端要有 chores');
   assert.strictEqual(snap.kids.length, 2);
   const momo = snap.kids.find(k => k.user.userId === 'momo');
   assert.strictEqual(momo.total, 300);
