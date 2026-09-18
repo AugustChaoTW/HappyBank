@@ -20,7 +20,7 @@
 | 本地狀態 | localStorage | **降級為唯讀快取**，不再是真實來源 |
 | 後端 | Google Apps Script Web App + Google Sheet 當資料庫 | Drive 檔案 → Sheet 資料表 |
 | 離線 | IndexedDB queue + `online` 事件補送 | 相同，但**加上 idempotency key** |
-| 身分 | 首頁選「你是誰」 | 相同，另加**伺服器端驗證的家長 PIN** |
+| 身分 | 首頁選「你是誰」，無驗證 | **帳號密碼登入**，帳號存在 Sheet，伺服器發 session token |
 | 部署 | GitHub Pages | 相同 |
 
 ### 關鍵差異：帳本的真實來源在伺服器
@@ -115,14 +115,37 @@ Apps Script time-driven trigger，**每月 1 日 00:30（Asia/Taipei）**結算�
 
 ## 5. 資料模型（Google Sheet，一分頁一表）
 
-### `kids`
+**資料庫位置**：Google Sheet「HappyBank 資料庫」（擁有者 `aug.chao@gmail.com`，未分享）
+`https://docs.google.com/spreadsheets/d/1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo/edit`
+Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
+
+分頁與表頭**不要手動建立**——schema 的唯一定義來源是 `apps-script/Setup.gs` 的 `SCHEMA` 常數，
+在 Apps Script 編輯器執行 `setup()` 即可建好（可重複執行，不動既有資料）。
+
+
+### `users`（登入帳號，取代原本的 `kids`）
 | 欄位 | 型別 | 說明 |
 |---|---|---|
-| kidId | string | `momo` / `coco` / `dodo` |
-| name | string | 顯示名 |
+| userId | string | 同時是帳號與 kidId：`momo` / `coco` / `dodo` / `parent` |
+| role | enum | `kid` / `parent` |
+| displayName | string | 顯示名 |
 | emoji | string | 👧 |
-| weeklyAllowance | int | 每週零用錢金額 |
-| active | bool | |
+| salt | string | 16 字元隨機鹽 |
+| passwordHash | string | 見 §8.1，**Sheet 內不存明文密碼** |
+| weeklyAllowance | int | 每週零用錢金額（parent 為 0） |
+| active | bool | 停用後無法登入 |
+| lastLoginTs | datetime | |
+| failedCount | int | 連續登入失敗次數 |
+| lockedUntil | datetime\|null | 鎖定到期時間 |
+
+### `sessions`
+| 欄位 | 型別 | 說明 |
+|---|---|---|
+| token | string | uuid，登入成功時發出 |
+| userId | string | |
+| createdTs | datetime | |
+| expiresTs | datetime | 小孩 30 天、家長 24 小時（config 可調） |
+| device | string | UA 片段，方便家長認出是哪台裝置並踢掉 |
 
 ### `accounts`
 | 欄位 | 型別 | 說明 |
@@ -188,17 +211,19 @@ Apps Script time-driven trigger，**每月 1 日 00:30（Asia/Taipei）**結算�
 
 ### `config`（key-value 單列表）
 `rate_current` · `rate_term` · `rate_goal` · `rate_gift` · `allowance_weekday`（0-6）·
-`parent_pin_hash` · `term_months_options` · `approval_mode`（見 §9）
+`session_days_kid` · `session_hours_parent` · `login_max_fail` · `login_lock_minutes` · `pbkdf_rounds` · `term_months_options` · `approval_mode`（見 §9）
 
 ---
 
 ## 6. 前端結構
 
 ```
-index.html              views: home / account / chores / goal / history / admin
+index.html              views: login / home / account / chores / goal / history / admin
 css/style.css           沿用 penghu-explorer 的視覺語彙（大字、大按鈕、手機直式）
 js/
-  config.js             apiUrl, apiToken, kids[], 預設利率（僅供離線顯示，以伺服器為準）
+  config.js             apiUrl, apiToken, 預設利率（僅供離線顯示，以伺服器為準）
+                        ※ 小孩名單不再寫死在這裡，登入後由伺服器回傳
+  auth.js               登入／登出、session token 保管、401 自動導回登入頁
   api.js                取代 upload.js：GET snapshot / POST action，共用 token
   queue.js              照抄 penghu-explorer，加 clientId
   store.js              localStorage 快照 + 資料新鮮度（「更新於 ○○」）
@@ -219,14 +244,16 @@ data/
 
 ### 各 view 要點
 
-- **home**：選「你是誰」→ 四張帳戶卡（活期 / 紅包 / 各定存 / 各目標），總資產大字，
+- **login**：帳號密碼登入。小孩版用大頭像選帳號 + 數字鍵盤輸入密碼，不用打字。
+- **home**：登入後直接進來 → 四張帳戶卡（活期 / 紅包 / 各定存 / 各目標），總資產大字，
   「這個月預計利息 ○○ 元」誘導存錢，待審/到期提醒 badge。
 - **account**：單一帳戶詳情 + 轉帳 + 提領申請。
 - **chores**：家事清單，點「我做完了 ✋」。
 - **goals**：開新子帳戶精靈（選 定存 or 目標 → 填目的 → 選期數/目標金額 → 試算「到期會變成 ○○ 元」）。
   **試算畫面是關鍵轉換點**，要把 10% 的威力視覺化。
 - **history**：全帳戶交易明細，可依帳戶篩選。
-- **admin**：`?admin=1` 進入，輸 PIN，伺服器驗。待審清單一鍵核准/退回、手動調帳、改零用錢、編家事。
+- **admin**：僅 `role = parent` 的 session 可進入（伺服器判定，前端只是隱藏入口）。
+  待審清單一鍵核准/退回、手動調帳、改零用錢、編家事、看 `sessions` 踢掉裝置。
 
 ---
 
@@ -235,7 +262,20 @@ data/
 沿用 penghu-explorer 的 `Content-Type: text/plain;charset=utf-8` 規避 CORS preflight。
 所有請求帶 `token`（共享密鑰）。
 
-### 7.1 `GET ?action=snapshot&token=…&kid=…`
+所有需要身分的請求都帶 `session`（登入取得的 token）。`token` 是全站共享密鑰，`session` 才是身分。
+
+### 7.0 登入
+
+| action | 參數 | 回傳 |
+|---|---|---|
+| `login` | userId, password | `{ ok, session, expiresTs, user }` |
+| `logout` | session | `{ ok }` |
+| `whoami` | session | `{ ok, user }`；session 過期回 `401` |
+
+登入失敗遞增 `failedCount`；達 `login_max_fail` 寫入 `lockedUntil`，鎖定期間一律拒絕。
+**錯誤訊息不得區分「帳號不存在」與「密碼錯誤」。**
+
+### 7.1 `GET ?action=snapshot&token=…&session=…`
 
 一次回傳該小孩畫面所需的全部資料，減少往返：
 
@@ -245,7 +285,8 @@ data/
   "chores": [...], "rates": {...} }
 ```
 
-家長模式 `&admin=1&pin=…` 額外回傳全部小孩 + 所有 pending requests。
+`role = parent` 的 session 額外回傳全部小孩 + 所有 pending requests。回傳的 `kid` 一律以 session 判定，
+**不接受前端指定 kidId**（否則 Momo 改個參數就能看 Coco 的帳）。
 
 ### 7.2 `POST`（body JSON）
 
@@ -255,10 +296,14 @@ data/
 | `request` | kind, amount, choreId, note | 建立申請 |
 | `cancel_request` | requestId | 小孩自己撤回 |
 | `open_account` | type, name, emoji, termMonths\|targetAmount | 開子帳戶 |
-| `admin_decide` | pin, requestId, decision, note | 核准/退回 |
-| `admin_adjust` | pin, kidId, accountId, amount, memo | 手動入帳/扣款/罰款 |
-| `admin_gift` | pin, kidId, amount, memo | 紅包入 `gift` |
-| `admin_config` | pin, key, value | 改利率/零用錢/家事 |
+| `admin_decide` | requestId, decision, note | 核准/退回 |
+| `admin_adjust` | kidId, accountId, amount, memo | 手動入帳/扣款/罰款 |
+| `admin_gift` | kidId, amount, memo | 紅包入 `gift` |
+| `admin_config` | key, value | 改利率/零用錢/家事 |
+| `admin_revoke_session` | token | 踢掉某台裝置 |
+| `change_password` | oldPassword, newPassword | 自己改密碼 |
+
+所有 `admin_*` 由伺服器檢查 `session.role === 'parent'`，前端不做判斷。
 
 ### 7.3 冪等與並發
 
@@ -273,9 +318,17 @@ data/
 
 ## 8. 安全
 
-1. **家長 PIN 絕不放 `config.js`。** 靜態站的 config.js 小孩點兩下就看得到。
-   PIN 的雜湊只存在 Sheet 的 `config.parent_pin_hash`，前端把 PIN 隨請求送出，**由伺服器驗**。
-   PIN 錯誤 5 次鎖 15 分鐘（記在 Script Properties）。
+### 8.1 登入與密碼
+
+1. **帳號存在 Sheet 的 `users` 分頁，密碼只存雜湊，不存明文。**
+   Apps Script 沒有 bcrypt，採**加鹽 SHA-256 迭代**（`pbkdf_rounds` 預設 1000 次）：
+   `hash = iterate(base64(SHA256(salt + ':' + password)), rounds)`。
+   這道防線擋的是「小孩翻開 Sheet 看到明文密碼」，不是擋外部攻擊者離線暴力破解——
+   對家用場景足夠，但**不要重用家裡其他地方的密碼**。
+2. **session token 由伺服器產生**，存 `sessions` 分頁；前端放 localStorage。
+   過期或被踢掉 → API 回 `401` → 前端清除並導回登入頁。
+3. 登入失敗 5 次鎖 15 分鐘，記在 `users.lockedUntil`。
+4. 沒有「家長 PIN」了——家長就是一個 `role = parent` 的帳號，權限一律由伺服器依 session 判定。
 2. **另開一支獨立的 Apps Script 專案 + 另一組 token。**
    penghu-explorer 的 token 已經公開在 GitHub 上，不能讓它同時開得了銀行的門。
    同一個 Google 帳號，不同專案、不同密鑰。
@@ -302,7 +355,8 @@ data/
 
 ### 9.2 其他待確認
 
-- 小孩人數與名單（沿用 penghu-explorer 的 momo / coco / dodo？年齡各多少，影響 UI 用字）
+- 小孩人數與名單、年齡（影響 UI 用字與密碼形式）
+- **小孩密碼形式**：4~6 位數字（大鍵盤好按，小小孩可行）vs 一般文字密碼 vs 圖案／emoji 序列
 - 每週零用錢預設金額、發放日（星期幾）
 - 家事清單初始內容與定價
 - 定存期數選項（1 / 3 / 6 個月？月息 10% 下，6 個月 = 本金 ×1.77）
@@ -337,5 +391,8 @@ M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持�
 - [ ] 跨月結算：活期與定存各自依正確利率複利
 - [ ] 定存到期 → 停止計息 + 首頁提醒
 - [ ] 飛航模式送出轉帳 → 復網自動補送，**且只入帳一次**
-- [ ] 小孩裝置輸錯 PIN 進不了 admin；連錯 5 次被鎖
+- [ ] Momo 登入後改 API 參數也看不到 Coco 的帳
+- [ ] 小孩帳號進不了 admin（即使手動改前端）；連錯 5 次密碼被鎖 15 分鐘
+- [ ] session 過期後自動導回登入頁，不會卡在空白畫面
+- [ ] 家長可在 admin 踢掉某台裝置，該裝置下次操作即失效
 - [ ] 兩台手機同時操作同一帳戶，餘額不會算錯
