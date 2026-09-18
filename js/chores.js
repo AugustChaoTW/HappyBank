@@ -52,15 +52,38 @@ const Chores = (() => {
 
   const tsOf = r => (r && r.ts ? Date.parse(r.ts) : NaN) || 0;
 
+  // 「今天是哪一天」以伺服器為準（snapshot.today，§7.1）。
+  // 小孩的平板時鐘會跑掉——電池沒電歸零、自己手動調時間、時區設成別國——
+  // 而 requests.ts 是伺服器寫的絕對時間，用裝置的「現在」去切日界線就會兩邊各講各的：
+  // 卡片畫成「可回報」，他拍完照送出才被 already-reported 打回來。
+  // 只有「現在」不可信；r.ts 一律照 periodKey 用台北時區換算，那個不受裝置時鐘影響。
+  function serverToday(snap) {
+    const t = snap && snap.today;
+    return (typeof t === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t)) ? t : null;
+  }
+
+  // 「現在」落在哪個期間。舊的離線快照沒有 today，就退回裝置時鐘算——
+  // 離線時畫面寧可有點舊，也不要整頁空白。
+  function currentPeriodKey(repeat, now, snap) {
+    const day = serverToday(snap);
+    if (!day) return periodKey(repeat, now);
+    if (repeat === 'once') return 'once';
+    if (repeat !== 'weekly') return 'd:' + day;
+    // 週界線要從伺服器那天往回推到週日；挑中午換算，免得在日界線上被四捨五入掉一天
+    return 'w:' + sundayYmd(new Date(day + 'T12:00:00+08:00'));
+  }
+
   // 一件家事 + 這個人的 requests → 四種狀態之一。
   // rejected / cancelled 不佔扣打，所以「被退回」仍然可以重報（§9.5 二）。
-  function deriveState(chore, requests, now) {
+  function deriveState(chore, requests, now, snap) {
     const when = now || new Date();
-    const key = periodKey(chore.repeat, when);
+    const key = currentPeriodKey(chore.repeat, when, snap);
     const mine = (requests || []).filter(r =>
       r && r.kind === 'chore_done' &&
       String(r.choreId) === String(chore.id) &&
-      periodKey(chore.repeat, r.ts || when) === key);
+      // r.ts 是伺服器寫的絕對時間，照台北時區換算不受裝置時鐘影響；
+      // 沒有 ts 的（理論上不該有）就當成「這個期間內的」，不要憑裝置時間亂歸日
+      (r.ts ? periodKey(chore.repeat, r.ts) === key : true));
 
     const latest = status => mine
       .filter(r => r.status === status)
@@ -76,30 +99,30 @@ const Chores = (() => {
   }
 
   // 今天還能賺的件數（被退回的也算——可以重報）
-  function availableCount(chores, requests, now, repeat) {
+  function availableCount(chores, requests, now, repeat, snap) {
     return (chores || [])
       .filter(c => c && c.active !== false && (!repeat || (c.repeat || 'daily') === repeat))
       .filter(c => {
-        const s = deriveState(c, requests, now).state;
+        const s = deriveState(c, requests, now, snap).state;
         return s === 'available' || s === 'rejected';
       }).length;
   }
 
   // 「等確認中 ＋20 元」用
-  function pendingReward(chores, requests, now) {
+  function pendingReward(chores, requests, now, snap) {
     return (chores || []).reduce((sum, c) =>
-      sum + (deriveState(c, requests, now).state === 'pending' ? (Number(c.reward) || 0) : 0), 0);
+      sum + (deriveState(c, requests, now, snap).state === 'pending' ? (Number(c.reward) || 0) : 0), 0);
   }
 
   // 首頁那顆「🧹 每日家事」大按鈕要寫的字。小孩不點進來也要知道今天還有沒有事做，
   // 所以三種狀態各一句：還能做的優先講（那是他今天還能賺的錢），其次等確認，最後才是做完了。
-  function homeButtonState(chores, requests, now) {
+  function homeButtonState(chores, requests, now, snap) {
     const daily = (chores || []).filter(c => c && c.active !== false && (c.repeat || 'daily') !== 'weekly');
     if (!daily.length) return { state: 'none', count: 0, label: '還沒有家事清單' };
     const when = now || new Date();
-    const n = availableCount(daily, requests, when, 'daily');
+    const n = availableCount(daily, requests, when, 'daily', snap);
     if (n > 0) return { state: 'available', count: n, label: `還有 ${n} 件可以做 →` };
-    const waiting = daily.filter(c => deriveState(c, requests, when).state === 'pending').length;
+    const waiting = daily.filter(c => deriveState(c, requests, when, snap).state === 'pending').length;
     if (waiting > 0) return { state: 'pending', count: waiting, label: `⏳ ${waiting} 件等確認` };
     return { state: 'approved', count: 0, label: '✅ 今天都做完了' };
   }
@@ -216,9 +239,9 @@ const Chores = (() => {
     return (snapshot && snapshot.chore_approver) || DEFAULT_APPROVER;
   }
 
-  function section(label, list, requests, now, emptyText) {
+  function section(label, list, requests, now, emptyText, snap) {
     if (!list.length) return `<h3 class="sec-title">${esc(label)}</h3><p class="empty">${esc(emptyText)}</p>`;
-    const cards = list.map(c => choreCard(c, deriveState(c, requests, now))).join('');
+    const cards = list.map(c => choreCard(c, deriveState(c, requests, now, snap))).join('');
     return `<h3 class="sec-title">${esc(label)}</h3><div class="chores">${cards}</div>`;
   }
 
@@ -231,15 +254,15 @@ const Chores = (() => {
     const daily = chores.filter(c => (c.repeat || 'daily') !== 'weekly');
     const weekly = chores.filter(c => c.repeat === 'weekly');
 
-    const doneToday = chores.filter(c => deriveState(c, requests, now).state === 'pending').length;
-    const waiting = pendingReward(chores, requests, now);
+    const doneToday = chores.filter(c => deriveState(c, requests, now, snap).state === 'pending').length;
+    const waiting = pendingReward(chores, requests, now, snap);
     el('chores-summary').textContent = doneToday
       ? `今天已回報 ${doneToday} 件，等確認中 ＋${Money.format(waiting)} 元`
       : (chores.length ? '挑一件做，拍張照就能賺錢' : '');
 
     el('chores-body').innerHTML = chores.length
-      ? section('今天可以做', daily, requests, now, '今天沒有安排家事') +
-        (weekly.length ? section('這週可以做', weekly, requests, now, '') : '')
+      ? section('今天可以做', daily, requests, now, '今天沒有安排家事', snap) +
+        (weekly.length ? section('這週可以做', weekly, requests, now, '', snap) : '')
       : '<p class="empty">還沒有任何家事，問問爸爸媽媽。</p>';
 
     const when = Money.formatWhen(snap.serverTs);
@@ -417,7 +440,7 @@ const Chores = (() => {
   // 進家事頁就不必再等一趟 snapshot 才有畫面。
   function homeButton(snap) {
     if (snap) snapshot = snap;
-    const st = homeButtonState((snap && snap.chores) || [], (snap && snap.requests) || [], new Date());
+    const st = homeButtonState((snap && snap.chores) || [], (snap && snap.requests) || [], new Date(), snap);
     return `
       <button class="big-btn big-btn-${st.state}" id="btn-chores">
         <span class="big-btn-icon">🧹</span>
@@ -493,6 +516,7 @@ const Chores = (() => {
   return {
     render: refresh, open, homeButton,
     // 純函式，給測試與其他頁用（零用錢頁沿用 periodKey／friendlyTs／title，兩邊的日界線與稱呼才會一致）
-    deriveState, periodKey, availableCount, pendingReward, errorMessage, friendlyTs, homeButtonState, title
+    deriveState, periodKey, currentPeriodKey, availableCount, pendingReward, errorMessage,
+    friendlyTs, homeButtonState, title
   };
 })();

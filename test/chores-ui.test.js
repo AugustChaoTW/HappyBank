@@ -137,3 +137,55 @@ test('friendlyTs：小孩讀得懂的時間，不是 ISO 字串', () => {
   assert.strictEqual(Chores.friendlyTs(''), '');
   assert.strictEqual(Chores.friendlyTs('not a date'), '');
 });
+
+// ---------- 日界線以伺服器為準（snapshot.today） ----------
+// 小孩的平板時鐘會跑掉：電池沒電歸零、自己手動調時間、時區設成別國。
+// 只要「今天」是裝置算的，卡片就會跟伺服器講不同的日子——
+// 畫成「可回報」他就再拍一次，然後被 already-reported 擋掉。
+
+const SNAP_TODAY = { today: '2026-09-18' };
+const WRONG_CLOCK = new Date(taipei('2026-09-19T10:00:00'));   // 平板以為已經是隔天
+
+test('currentPeriodKey：有 snapshot.today 就用它，沒有才退回裝置時鐘', () => {
+  assert.strictEqual(Chores.currentPeriodKey('daily', WRONG_CLOCK, SNAP_TODAY), 'd:2026-09-18');
+  assert.strictEqual(Chores.currentPeriodKey('daily', WRONG_CLOCK, null), 'd:2026-09-19');
+  // 壞掉或缺漏的 today 不能讓畫面空白，一律當成沒有
+  assert.strictEqual(Chores.currentPeriodKey('daily', WRONG_CLOCK, { today: 'yesterday' }), 'd:2026-09-19');
+  assert.strictEqual(Chores.currentPeriodKey('daily', WRONG_CLOCK, {}), 'd:2026-09-19');
+  assert.strictEqual(Chores.currentPeriodKey('once', WRONG_CLOCK, SNAP_TODAY), 'once');
+});
+
+test('currentPeriodKey：weekly 也要從伺服器那天往回推到週日', () => {
+  // 2026-09-18 是週五 → 那一週的週日是 09-13
+  assert.strictEqual(Chores.currentPeriodKey('weekly', WRONG_CLOCK, SNAP_TODAY), 'w:2026-09-13');
+  // 伺服器說已經是週日了，裝置卻還停在上週五
+  assert.strictEqual(
+    Chores.currentPeriodKey('weekly', new Date(taipei('2026-09-18T10:00:00')), { today: '2026-09-20' }),
+    'w:2026-09-20');
+});
+
+test('deriveState：裝置時鐘跑到明天，也要照伺服器的今天算（不然會重報一次）', () => {
+  const r = req({ status: 'approved', ts: taipei('2026-09-18T20:00:00') });
+  // 裝置以為是 9/19 → 昨天的紀錄不算數 → 畫成「可回報」
+  assert.strictEqual(Chores.deriveState(DAILY, [r], WRONG_CLOCK).state, 'available');
+  // 伺服器說今天還是 9/18 → 已確認，不能再報
+  assert.strictEqual(Chores.deriveState(DAILY, [r], WRONG_CLOCK, SNAP_TODAY).state, 'approved');
+});
+
+test('deriveState：裝置時鐘停在昨天，也不要把昨天的紀錄當成今天的', () => {
+  const yesterday = req({ status: 'approved', ts: taipei('2026-09-17T20:00:00') });
+  const slow = new Date(taipei('2026-09-17T23:00:00'));
+  assert.strictEqual(Chores.deriveState(DAILY, [yesterday], slow).state, 'approved', '裝置以為還是 9/17');
+  assert.strictEqual(Chores.deriveState(DAILY, [yesterday], slow, SNAP_TODAY).state, 'available',
+    '伺服器說今天是 9/18，昨天做過的今天可以再做');
+});
+
+test('availableCount / pendingReward / homeButtonState 都吃伺服器的今天', () => {
+  const r = req({ status: 'pending', ts: taipei('2026-09-18T20:00:00') });
+  assert.strictEqual(Chores.availableCount([DAILY], [r], WRONG_CLOCK, 'daily'), 1, '照裝置時鐘會以為還能做');
+  assert.strictEqual(Chores.availableCount([DAILY], [r], WRONG_CLOCK, 'daily', SNAP_TODAY), 0);
+  assert.strictEqual(Chores.pendingReward([DAILY], [r], WRONG_CLOCK), 0);
+  assert.strictEqual(Chores.pendingReward([DAILY], [r], WRONG_CLOCK, SNAP_TODAY), 10);
+  assert.strictEqual(Chores.homeButtonState([DAILY], [r], WRONG_CLOCK).label, '還有 1 件可以做 →');
+  assert.strictEqual(Chores.homeButtonState([DAILY], [r], WRONG_CLOCK, SNAP_TODAY).label, '⏳ 1 件等確認');
+});

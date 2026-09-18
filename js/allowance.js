@@ -35,14 +35,19 @@ const Allowance = (() => {
 
   const tsOf = r => (r && r.ts ? Date.parse(r.ts) : NaN) || 0;
 
-  // 「今天」的界線直接借 Chores.periodKey('daily')——零用錢與家事必須同一條線，
+  // 「今天」的界線直接借 Chores——零用錢與家事必須同一條線，
   // 不然小孩在半夜十二點前後會看到兩頁講不同的日子。
+  // 而「今天是哪一天」以 snapshot.today（伺服器的台北日曆天）為準：
+  // 平板時鐘跑掉時，畫面寫「今天還沒領」而伺服器認為領過了，
+  // 小孩會白拍一張照送出去才被 already-claimed 打回來。
+  // 舊的離線快照沒有 today，currentPeriodKey 自己會退回裝置時鐘。
   function claimState(snap, now) {
     const when = now || new Date();
-    const key = Chores.periodKey('daily', when);
+    const key = Chores.currentPeriodKey('daily', when, snap);
     const mine = ((snap && snap.requests) || []).filter(r =>
       r && r.kind === 'allowance_claim' &&
-      Chores.periodKey('daily', r.ts || when) === key);
+      // r.ts 是伺服器寫的絕對時間，換算成台北日不受裝置時鐘影響
+      (r.ts ? Chores.periodKey('daily', r.ts) === key : true));
 
     const latest = status => mine
       .filter(r => r.status === status)
@@ -54,14 +59,17 @@ const Allowance = (() => {
     return { state, request, amount: amountOf(snap, request) };
   }
 
-  // 領到多少錢？伺服器不把金額寫回 request（核准時才讀 users.dailyAllowance），
-  // 所以核准後只能從帳本上那筆同一天的零用錢入帳回推。
-  // 三個來源都沒有就回 0，畫面寧可不寫數字，也不要寫錯數字。
+  // 領到多少錢？優先用 request.amount——核准時伺服器會把實付金額回寫上去（§9.6）。
+  // 還沒簽到（沒有 request）時就用 snapshot.dailyAllowance，
+  // 這樣 🎁 按鈕在第一次簽到之前就寫得出「今天還沒領 ＋20」。
+  // 兩個都沒有才去帳本上找同一天那筆零用錢入帳回推（舊快照的退路）。
+  // 全都沒有就回 0，畫面寧可不寫數字，也不要寫錯數字。
   function amountOf(snap, request) {
-    const direct = Number(request && request.amount) || Number(snap && snap.daily_allowance) || 0;
+    const configured = Number(snap && (snap.dailyAllowance != null ? snap.dailyAllowance : snap.daily_allowance)) || 0;
+    const direct = Number(request && request.amount) || configured || 0;
     if (direct) return direct;
     if (!request || request.status !== 'approved' || !request.decidedTs) return 0;
-    const day = Chores.periodKey('daily', request.decidedTs);
+    const day = Chores.periodKey('daily', request.decidedTs);   // 兩邊都是伺服器時間，可以直接比
     const hit = ((snap && snap.ledger) || []).find(l =>
       l && l.type === 'allowance' && Chores.periodKey('daily', l.ts) === day);
     return Number(hit && hit.amount) || 0;
@@ -115,7 +123,9 @@ const Allowance = (() => {
       return { state: 'approved', label: `✅ 今天領到了${money}` };
     }
     if (info.state === 'rejected') return { state: 'rejected', label: '❌ 退回了，再試一次 →' };
-    return { state: 'available', label: '今天還沒領 →' };
+    // 還沒簽到就先把金額講出來（snapshot.dailyAllowance）——那是小孩今天按進來的理由
+    const money = info.amount > 0 ? ` ＋${Money.format(info.amount)}` : '';
+    return { state: 'available', label: `今天還沒領${money} →` };
   }
 
   // 伺服器錯誤碼 → 小孩看得懂的話。

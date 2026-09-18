@@ -761,3 +761,54 @@ test('小孩快照要帶 chore_approver，才知道要等誰確認', () => {
   const snap2 = gs.$.call({ action: 'snapshot', session: login(gs, 'momo') });
   assert.strictEqual(snap2.chore_approver, 'aug', '改設定後小孩端要跟著變');
 });
+
+// ------------------------------------------ 伺服器的「今天」與每日金額（snapshot）
+// 小孩的平板時鐘會跑掉（電池沒電歸零、手動調時間、時區設成別國）。
+// 只要前端自己算「今天」，畫面就會跟伺服器講不同的日子：
+// 明明簽到過了卻寫「今天還沒領」，按下去被 already-claimed 擋掉。
+// 所以日界線一律由伺服器帶下來。
+
+test('小孩 snapshot 帶伺服器的今天（Asia/Taipei 的 yyyy-MM-dd）', () => {
+  const t = bank();
+  const snap = t.gs.$.call({ action: 'snapshot', session: t.momo });
+  assert.match(String(snap.today), /^\d{4}-\d{2}-\d{2}$/, 'today 要是 yyyy-MM-dd：' + snap.today);
+  assert.strictEqual(snap.today, t.gs.taipeiDay(new Date()),
+    'today 要跟伺服器自己算日界線用的 taipeiDay 一模一樣');
+});
+
+test('snapshot 的 today 就是「現在簽到會算成哪一天」', () => {
+  const t = bank();
+  const snap = t.gs.$.call({ action: 'snapshot', session: t.momo });
+  const req = claim(t.gs, t.momo);
+  const row = requestRows(t.gs).find(r => r.id === req.requestId);
+  // 前端拿 today 去比對 requests.ts 落在哪一天，兩邊的切法必須是同一套
+  assert.strictEqual(t.gs.chorePeriodKey('daily', row.ts), 'day:' + snap.today);
+});
+
+test('家長 snapshot 也帶 today（同一個畫面上的日期不能有兩種說法）', () => {
+  const t = bank();
+  const snap = t.gs.$.call({ action: 'snapshot', session: t.vicky });
+  assert.strictEqual(snap.today, t.gs.taipeiDay(new Date()));
+});
+
+test('小孩 snapshot 帶自己的 dailyAllowance，按鈕才寫得出「今天還沒領 ＋20」', () => {
+  const t = bank();
+  const snap = t.gs.$.call({ action: 'snapshot', session: t.momo });
+  assert.strictEqual(snap.dailyAllowance, 20);
+
+  // 家長去 Sheet 上把金額改掉 → 小孩端下一次 snapshot 就要跟著變，不用改程式
+  setDailyAllowance(t.gs, 'momo', 35);
+  const after = t.gs.$.call({ action: 'snapshot', session: t.momo });
+  assert.strictEqual(after.dailyAllowance, 35);
+
+  // 是「自己那一列」的金額，不是全家共用的一個數字
+  setDailyAllowance(t.gs, 'coco', 12);
+  assert.strictEqual(t.gs.$.call({ action: 'snapshot', session: t.coco }).dailyAllowance, 12);
+  assert.strictEqual(t.gs.$.call({ action: 'snapshot', session: t.momo }).dailyAllowance, 35);
+});
+
+test('dailyAllowance 格子被清空 → snapshot 回 0，不是 NaN 也不是空字串', () => {
+  const t = bank();
+  setDailyAllowance(t.gs, 'momo', '');
+  assert.strictEqual(t.gs.$.call({ action: 'snapshot', session: t.momo }).dailyAllowance, 0);
+});

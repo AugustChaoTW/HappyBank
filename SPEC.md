@@ -445,7 +445,9 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 ## 6. 前端結構
 
 ```
-index.html              views: login / home / daily / account / chores / goal / history / admin
+index.html              已實作的 view id：view-pick / view-pw / view-home / view-chores /
+                        view-allowance（每日簽到）/ view-admin
+                        尚未實作：account / goal / history
 css/style.css           沿用 penghu-explorer 的視覺語彙（大字、大按鈕、手機直式）
 js/
   config.js             apiUrl, apiToken, 預設利率（僅供離線顯示，以伺服器為準）
@@ -456,9 +458,11 @@ js/
   store.js              localStorage 快照 + 資料新鮮度（「更新於 ○○」）
   money.js              金額格式化、利息試算、「還要幾週」估算
   account.js            餘額頁、帳戶卡片、轉帳
-  daily.js              每日簽到：三個勾選項目、拍照、送出、當天狀態（§9.6）
+  allowance.js          每日簽到：三個勾選項目、拍照、送出、當天狀態（§9.6）。
+                        暴露 `Allowance` IIFE，畫的是 `#view-allowance`
+                        （**檔名與 view 都不叫 `daily`**——本節原本寫 daily.js，以程式為準）
   photo.js              拍照＋canvas 壓縮＋照片縮圖延遲載入與記憶體快取，
-                        chores.js 與 daily.js 共用（§7.5、§7.6）
+                        chores.js 與 allowance.js 共用（§7.5、§7.6）
   chores.js             家事清單、回報、拍照與壓縮（canvas → JPEG base64，見 §7.5）
   goals.js              開子帳戶（定存 / 目標）、進度條
   history.js            交易明細
@@ -484,15 +488,15 @@ data/
 
   **最上面是每日簽到卡**（小孩端，`role = kid` 才有），在帳戶卡之前——
   它是每天打開 app 的第一個理由，不能藏在分頁裡：
-  - 今天還沒送 → 大字「今天的 20 元還沒領 👉」，點進 daily view。
-  - 今天已送、等確認 → 「⏳ 等媽媽確認 20 元」+ 送出時間。
-  - 今天已入帳 → 「✅ 今天的 20 元領到了」+ 確認人與確認時間。
-  - 被退回 → 「❌ 退回：⟨理由⟩，可以重做一次」，**當天仍可重送**（§9.6）。
+  - 今天還沒送 → 「今天還沒領 ＋20 →」（金額來自 `snapshot.dailyAllowance`），點進 allowance view。
+  - 今天已送、等確認 → 「⏳ 等媽媽確認」+ 送出時間。
+  - 今天已入帳 → 「✅ 今天領到了 ＋20」+ 確認人與確認時間。
+  - 被退回 → 「❌ 退回了，再試一次 →」，**當天仍可重送**（§9.6）；理由在 allowance 頁上寫出來。
   文案只講「今天」，**不要出現「昨天沒領」之類的提示**——沒領到就是沒領到，
   補不回來，提醒一次就夠了，不需要天天鞭屍（§9.6）。
-- **daily**：每日簽到頁（小孩端）。畫面由上到下就三段：
+- **allowance**（`#view-allowance`，`js/allowance.js`）：每日簽到頁（小孩端）。畫面由上到下就三段：
   1. **三個大勾選框**，文字來自 `config.daily_checklist`（伺服器 snapshot 帶下來，
-     §7.1），**不要寫死在前端**——家長改設定，這裡就要跟著變。
+     §7.1 的 `daily_checklist`），**不要寫死在前端**——家長改設定，這裡就要跟著變。
      項目數也不要寫死成 3，照著陣列長度畫。
   2. **拍照區**：全部勾滿才亮起來，流程與 chores 完全一樣（`capture="environment"`
      → canvas 壓縮 → 預覽 + 重拍，§7.5）。
@@ -594,7 +598,8 @@ data/
   "ledger":   [ /* 自己的最近 50 筆，新到舊 */ ],
   "requests": [ /* 自己的 pending，外加今天/本期間已決定的 chore_done 與 allowance_claim */ ],
   "chores":   [ /* active 且屬於自己或公開的家事 */ ],
-  "dailyChecklist": [ "好好照顧自己", "尊重別人的需求", "完成自己的工作" ],
+  "daily_checklist": [ "好好照顧自己", "尊重別人的需求", "完成自己的工作" ],
+  "chore_approver": "vicky",
   "dailyAllowance": 20,
   "today": "2026-09-18" }
 ```
@@ -602,9 +607,11 @@ data/
 `role = parent`：
 
 ```json
-{ "ok": true, "serverTs": "...", "rates": {...},
+{ "ok": true, "serverTs": "...", "today": "2026-09-18", "rates": {...},
   "user": { /* 家長自己 */ },
   "kids": [ { "user": {...}, "accounts": [...], "total": 1234 } ],
+  "chore_approver": "vicky",
+  "chores":   [ /* 家事全表（不過濾 active），待審清單要印名稱與獎金 */ ],
   "requests": [ /* 全家所有 pending */ ],
   "ledger":   [ /* 全家最近 50 筆，新到舊 */ ] }
 ```
@@ -616,28 +623,42 @@ data/
 - `ledger` **新到舊**（newest-first），取最近 50 筆；小孩只看得到自己的。
 - `rateMonthly` 是**小數**（5% = `0.05`），不是百分比數字。
 - `lockUntil` 是 ISO 字串或 `null`；`targetAmount` 是整數或 `null`（沒設就是 `null`，不是 0）。
-- `balance` 是整數元。家長端沒有 `chores`；小孩端沒有 `kids`。
+- `balance` 是整數元。小孩端沒有 `kids`。
+  **家長端也有 `chores`**（本行原本寫「家長端沒有 `chores`」，與程式不符）：帶的是
+  `chores` 全表，不過濾 `active`、不過濾 `kidId`——待審清單要印出家事名稱與獎金，
+  不帶就只能靠前端寫死的對照表猜，家長一改標題或金額，清單就顯示舊的。
 - 小孩 session 打 snapshot 時，若活期／紅包帳戶還不存在會自動補建。
 - 小孩端的 `requests` 除了 `pending`，還要**額外帶回「今天（或本週）已決定」的 `chore_done`
   與「今天已決定」的 `allowance_claim`**，
   含 `status` · `photoFileId` · `decidedTs` · `decidedBy` · `decidedProxy` · `decidedNote`，
   `allowance_claim` 另帶 `checklist`。
   沒有這些，chores 頁與 daily 頁畫不出「今天已回報 / 媽媽在 9/18 晚上 9:14 確認」的狀態（§6）。
-- `dailyChecklist` 是**陣列**，由伺服器把 `config.daily_checklist` 以 `|` split 後 trim 而成
-  （順序即顯示順序）。前端照著它畫勾選框，**項目文字與項目數都不寫死**（§6）。
-  家長端不需要這個欄位，但 admin 的「改項目」表單要用，所以 `role = parent` 也一起帶。
+- `daily_checklist`（**snake_case，與 `config` 的 key 同名**；不是 `dailyChecklist`）是**陣列**，
+  由伺服器把 `config.daily_checklist` 以 `|` split 後 trim 而成（順序即顯示順序）。
+  前端照著它畫勾選框，**項目文字與項目數都不寫死**（§6）。
+  ⚠️ **目前只有 `role = kid` 帶這個欄位。** admin 的「改項目」表單還沒做
+  （`admin_config` 本身也還沒實作，見 §7.2），等要做時再把它加進家長端的形狀。
+- `chore_approver`（頂層字串，值同 `config.chore_approver`）**小孩端與家長端都帶**。
+  小孩端拿它寫「等媽媽確認」而不是在前端寫死一個名字；
+  家長端拿它判斷自己按下去是正式確認還是代理（§9.5 三）。
 - `dailyAllowance` 是該小孩自己那一列的金額（整數元），**只供顯示**；
   真正入帳的金額是核准當下伺服器再查一次的值（§9.6）。
-- `today` 是伺服器以 `Asia/Taipei` 算出的今天（`yyyy-MM-dd`）。
+- `today` 是伺服器以 `Asia/Taipei` 算出的今天（`yyyy-MM-dd`），**小孩端與家長端都帶**。
   前端**不要拿裝置時間判斷「今天有沒有簽到」**——小孩把手機時間調前一天就能多領一次，
-  日界線一律以伺服器為準。
+  平板電池沒電後時鐘歸零、或時區被設成別國，也會讓畫面與伺服器各講各的日子
+  （畫面寫「今天還沒領」，按下去卻被 `already-claimed` 擋掉）。日界線一律以伺服器為準。
+  前端的用法是 `Chores.currentPeriodKey(repeat, now, snapshot)`：有 `snapshot.today`
+  就用它，沒有（舊的離線快照）才退回裝置時鐘算——**退路要留著**，
+  離線時畫面寧可有點舊，也不要整頁空白。
+  `requests.ts` 那一側不受影響：那是伺服器寫的絕對時間，照 `Asia/Taipei` 換算就對得上。
 - 家長端的 `requests` 帶 `photoFileId`（**不是圖片內容**，snapshot 不塞 base64）供待審清單
   延遲抓縮圖用（§7.6），並帶 `chore_approver`
   （放在頂層，值同 `config.chore_approver`），讓 admin 知道自己按下去是正式確認還是代理。
-  `kind = allowance_claim` 那幾筆另外帶 `checklist`（原字串，前端自己 split 攤開）
-  與 `amount`（伺服器從該小孩的 `users.dailyAllowance` 帶的顯示值），
-  否則待審清單畫不出「他勾了哪三項、這筆是多少錢」（§6）。
-  頂層另帶 `dailyChecklist` 供 admin 的設定表單用。
+  `kind = allowance_claim` 那幾筆另外帶 `checklist`（原字串，前端自己 split 攤開）。
+  ⚠️ **`amount` 在 `pending` 階段是空字串**：`request(allowance_claim)` 寫入時就留空（§7.2），
+  金額是核准當下才查 `users.dailyAllowance` 決定並回寫的（§9.6 四）。
+  所以待審清單要印「這筆是多少錢」，得自己去查該小孩的 `dailyAllowance`——
+  **待審階段的 `req.amount` 不要拿來當金額用**。
 
 ### 7.2 `POST`（body JSON）
 
@@ -650,12 +671,22 @@ data/
 | `admin_decide` | requestId, decision, note, **proxy** | 核准/退回。家事的核准者必須是 `config.chore_approver`，其他家長要代理時必須明確帶 `proxy: true`（見下與 §9.5） |
 | `admin_adjust` | kidId, accountId, amount, memo | 手動入帳/扣款/罰款 |
 | `admin_gift` | kidId, amount, memo | 紅包入 `gift` |
-| `admin_config` | key, value | 改 `config` 的利率、`daily_checklist` 等設定；改某個小孩的零用錢**不走這支**，是改 `users.dailyAllowance`（走 `admin_set_allowance`） |
-| `admin_set_allowance` | kidId, amount | 改某個小孩的 `users.dailyAllowance`（整數、0 ≤ amount ≤ 1000）。**只改設定，不入帳** |
-| `admin_revoke_session` | token | 踢掉某台裝置 |
+| `admin_config` | key, value | 🚧 **尚未實作** — 改 `config` 的利率、`daily_checklist` 等設定；改某個小孩的零用錢**不走這支**，是改 `users.dailyAllowance`（走 `admin_set_allowance`） |
+| `admin_set_allowance` | kidId, amount | 🚧 **尚未實作** — 改某個小孩的 `users.dailyAllowance`（整數、0 ≤ amount ≤ 1000）。**只改設定，不入帳** |
+| `admin_revoke_session` | token | 🚧 **尚未實作** — 踢掉某台裝置 |
 | `change_password` | oldPassword, newPassword | 自己改密碼 |
 
 所有 `admin_*` 由伺服器檢查 `session.role === 'parent'`，前端不做判斷。
+
+> 🚧 **這張表是目標，不是現況。** `Code.gs` 的 `route()` 目前只認得這些 action：
+> `users` · `login` · `logout` · `whoami` · `snapshot` · `change_password` ·
+> `request` · `cancel_request` · `chore_photo` ·
+> `admin_decide` · `admin_adjust` · `admin_gift` · `admin_recalc`。
+> 其餘（`transfer` · `open_account` · `admin_config` · `admin_set_allowance` ·
+> `admin_revoke_session`）**還沒有任何實作**，打過去一律回 `unknown-action`。
+> 尤其 `admin_set_allowance`：**現在要改某個小孩的每日零用錢，只能直接去 Sheet 上
+> 改 `users.dailyAllowance` 那一格**（改完下一次 snapshot 就生效，§7.1）。
+> `admin_recalc` 反過來——它有實作但這張表沒列，說明在 §7.3。
 
 #### `transfer` 的伺服器端限制：`gift` 不參與轉帳
 
@@ -717,7 +748,11 @@ UI 不給轉帳按鈕（§6）只是不要讓小孩白試，真正擋下來的�
 3. **項目設定**：讀 `config.daily_checklist`，以 `|` split、逐段 `trim()`、捨棄空段，
    得到項目陣列 `items`。`items.length === 0` → `ok:false, error:'server'`，
    訊息「每日簽到的項目還沒設定好，請家長檢查」。**不要 fallback 成「不用勾也能領」。**
-4. **三項全勾**（真正的新規則）：請求帶 `checks`，是一個**布林陣列**。
+4. **三項全勾**（真正的新規則）：請求帶 `checks`，是一個**布林陣列**（照 `items` 的順序）。
+   - 實作上還多吃兩種寫法，因為離線佇列裡可能躺著舊格式的請求：
+     欄位名 `checked` 與 `checks` 都收（`checked` 優先），
+     內容除了布林陣列，也接受「勾到的項目文字」陣列——
+     但一樣要求**數量剛好、且涵蓋 `items` 的每一項**（重複湊數、夾帶設定外的項目都不算）。
    - `checks` 不是陣列、或 `checks.length !== items.length`
      → `ok:false, error:'checklist-incomplete'`。
    - 其中**任何一項不為真**（`false` / 缺漏 / 空字串 / `0`）
@@ -775,7 +810,11 @@ UI 不給轉帳按鈕（§6）只是不要讓小孩白試，真正擋下來的�
 **不寫 ledger、request 維持 `pending`**（不要核准一筆 0 元的帳）。
 
 不論核准或退回，一律寫回 `decidedTs`（伺服器時間）、`decidedBy`、`decidedProxy`、`decidedNote`；
-核准另外寫一筆 ledger（見 §9.5）。已經是 `approved` / `rejected` / `cancelled` 的 request
+核准另外寫一筆 ledger（見 §9.5），並**把實付金額回寫到 `requests.amount`**
+（`chore_done` 寫 `chores.reward`、`allowance_claim` 寫該小孩的 `users.dailyAllowance`，
+與 ledger 那筆同一個數字，在同一把鎖內一起寫）。
+**前端不必自己推算金額**：沒有這個回寫，小孩端只能去 ledger 找「同一天最後一筆
+`type = allowance`」，那會跟手動調帳之類的入帳撞在一起，畫面就顯示錯的數字。已經是 `approved` / `rejected` / `cancelled` 的 request
 再送一次 → `ok:false, error:'already-decided'`（兩個家長同時按下去的情況，靠 §7.3 的 script lock 分出先後）。
 
 ### 7.3 冪等與並發
@@ -815,6 +854,8 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 | `zero-amount` | 核准時查 `users.dailyAllowance`（或 `chores.reward`）是 0／沒設定 | 家長端顯示 `message`，請先去設定金額再核准；該筆維持 `pending` |
 | `needs-proxy` | 非指定核准者要核准家事，但沒按「代替確認」 | 把按鈕換成「代替 Vicky 確認」，等家長再按一次；**不自動重送** |
 | `already-decided` | 這筆 request 已經被別人決定了 | 重新抓 snapshot，顯示現況 |
+| `note-required` | 退回時沒寫理由（`admin_decide` 的 `decision = 'reject'`，§9.4） | 家長端把焦點移回理由欄，顯示 `message`；一鍵範本就是為了這個存在 |
+| `bad-request` | 請求少了必要參數（例如 `request` 沒帶 `clientId`、`decision` 不是 approve/reject） | 前端的 bug，顯示 `message` 並請使用者重新整理；**不要重試** |
 | `bad-json` / `unknown-action` / `server` | 請求格式錯、action 不認得、伺服器例外 | 顯示 `message`，視為暫時性錯誤 |
 
 > 「401」在本專案一律指這個 `error: 'unauthorized'` 的 200 回應，不是 HTTP 狀態碼。
@@ -1075,7 +1116,11 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 核准時（在 §7.3 的 script lock 內，一次寫完）：
 
 1. 更新 `requests`：`status = 'approved'`、`decidedTs`（伺服器時間）、
-   `decidedBy`（**實際按的人**）、`decidedProxy`、`decidedNote`（核准時選填）。
+   `decidedBy`（**實際按的人**）、`decidedProxy`、`decidedNote`（核准時選填），
+   以及 **`amount` ＝這次實際入帳的金額**（送出時留空，核准當下查
+   `users.dailyAllowance` 才寫進去，與下面那筆 ledger 同一個數字、同一把鎖）。
+   小孩端的 🎁 卡片直接讀這個值寫「✅ 媽媽在 9/18 晚上 9:14 確認 ＋20」，
+   **不必回去 ledger 猜是哪一筆**。
 2. 寫一筆 `ledger`：
 
    | 欄位 | 值 |
@@ -1159,7 +1204,8 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 2. **`pending` 不會過期。** 禮拜二送出的那一筆，禮拜天批下去照樣入帳 20 元，
    **不會因為「已經不是禮拜二了」就自動作廢**。系統沒有任何一支程式會去砍舊的 pending。
 3. **ledger 的 `ts` 仍是核准時間**（與家事一致，§9.5 五），
-   但 **`memo` 必須帶上簽到日期**：「每日簽到（9/15）」。
+   但 **`memo` 必須帶上簽到日期**：實作寫的是「**每日零用錢（9/15）**」
+   （本節原本寫「每日簽到（9/15）」，以程式為準）。
    禮拜天入帳六筆、memo 分別寫 9/15 到 9/20，小孩才對得起來。
 4. **「沒領到」只有一種情況：那天根本沒送出。** 不是「送了但媽媽還沒批」。
 5. **被退回 / 自己撤回，當天還能重送**（`rejected` / `cancelled` 不佔扣打，§7.2）。
@@ -1190,7 +1236,7 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
    | `by` | **實際核准者的 userId**（代理時就是 `aug`，不是 `vicky`） |
    | `refId` | requestId |
    | `clientId` | `req:<requestId>`（一筆 request 只入得了一次帳，兩個家長搶著按也一樣） |
-   | `memo` | 「每日簽到（9/15）」；代理時後綴「· Aug 代替 Vicky 確認」 |
+   | `memo` | 「每日零用錢（9/15）」；代理時後綴「· Aug 代替 Vicky 確認」 |
 
 3. 退回不寫 ledger，但一樣要寫 `decidedBy` / `decidedProxy` / `decidedTs`，
    `decidedNote` 退回時必填（§9.4），而且小孩要看得到那句理由。
@@ -1274,7 +1320,7 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 | **M4 審核** | requests（四種 kind）+ admin 待審清單（兩種要審的 kind 要分得出來） | 小孩申請提領 → 家長核准 → 入帳；退回看得到理由 |
 | **M5 離線與韌性** | IndexedDB queue + clientId 冪等 + 快照新鮮度 | 飛航模式操作 → 復網自動補送且不重複入帳 |
 | **M6 家事與獎勵（含照片）** ⬆️ *提前到 M4 之後緊接著做* | chores 清單、**拍照＋canvas 壓縮**、**Drive 照片子系統**、`request(chore_done)` 的一天一次伺服器檢查、`admin_decide` 的指定核准者與**代理確認**、確認時間／確認人顯示 | 小孩拍照回報 → Vicky（或 Aug 代理）確認 → 入活期；沒照片送不出、同一件一天報不了第二次；小孩看得到「媽媽在 X 時確認」 |
-| **M7 每日簽到零用錢** 🆕 | daily view（三個勾選項目來自 `config.daily_checklist`）、`request(allowance_claim)` 的全勾＋照片＋一天一次驗證、核准入帳 `users.dailyAllowance`、admin 待審清單分辨兩種 kind 與按類型全選、home 的簽到卡（§9.6） | 三項全勾＋拍照才送得出；同一天送第二次回 `already-claimed`；媽媽（或代理）確認後 20 元進活期；**禮拜二送出、禮拜天才批，memo 仍寫「每日簽到（9/15）」且照樣入帳** |
+| **M7 每日簽到零用錢** 🆕 | allowance view（`js/allowance.js`，三個勾選項目來自 `config.daily_checklist`）、`request(allowance_claim)` 的全勾＋照片＋一天一次驗證、核准入帳 `users.dailyAllowance`、admin 待審清單分辨兩種 kind 與按類型全選、home 的簽到卡（§9.6） | 三項全勾＋拍照才送得出；同一天送第二次回 `already-claimed`；媽媽（或代理）確認後 20 元進活期；**禮拜二送出、禮拜天才批，memo 仍寫「每日零用錢（9/15）」且照樣入帳** |
 
 > ⚙️ **M7 幾乎不需要新機具。** 照片、`clientId` 冪等、台北日界線（`chorePeriodKey`）、
 > `admin_decide` 的核准者與代理規則，M5／M6 全部做完了——
@@ -1349,7 +1395,7 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
   以及 §7.2 的 `transfer` · `request` · `cancel_request` · `open_account` ·
   `admin_decide` · `admin_config` · `admin_set_allowance` · `admin_revoke_session`，
   M6 的照片子系統（Drive 建檔、`photoFileId`、`chore_photo` 取圖、代理確認），
-  以及 M7 的每日簽到（`request(allowance_claim)`、daily view、`config.daily_checklist`）。
+  以及 M7 的每日簽到（`request(allowance_claim)`、allowance view、`config.daily_checklist`）。
 - 前端的邏輯 401 處理（收到 `error:'unauthorized'` 就清 session 導回登入頁，§7.4）已接上，
   快照快取也改成每人一個 key，避免共用平板上看到前一個人的餘額。
 
@@ -1414,7 +1460,7 @@ M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持�
       **手工組一個只勾兩項的請求送出去，伺服器回 `checklist-incomplete`**
 - [ ] **每日簽到沒拍照就不能送出**：送出鍵是灰的；手工組沒有 `photo` 的請求回 `photo-required`
 - [ ] 三個勾選項目的**文字與數量來自 `config.daily_checklist`**，不是寫死的：
-      把該格改成四項，daily view 立刻變成四個框，**且只勾三項會被伺服器擋下**（不用改程式、不用重新部署）
+      把該格改成四項，allowance view 立刻變成四個框，**且只勾三項會被伺服器擋下**（不用改程式、不用重新部署）
 - [ ] 把 `config.daily_checklist` 清空 → `request(allowance_claim)` 回 `server`，
       **不會變成「不用勾也能領」**
 - [ ] **同一天送第二次被擋掉**，回 `already-claimed`；**繞過 UI 手工組請求也擋得住**
@@ -1424,17 +1470,22 @@ M1–M3 先做，因為「看到錢變多」是這個 app 唯一能讓小孩持�
       **前端把 amount 改成 200 送出也沒用**；把某個小孩的金額改成 30，只有他變 30
 - [ ] `users.dailyAllowance` 沒設定或為 0 時核准 → 回 `zero-amount`，**不寫 ledger、該筆維持 pending**
 - [ ] **禮拜二送出、媽媽禮拜天才批 → 照樣入帳 20 元**，ledger 的 `ts` 是禮拜天、
-      但 memo 寫「每日簽到（9/15）」；**pending 不會因為過了那天就作廢**
+      但 memo 寫「每日零用錢（9/15）」；**pending 不會因為過了那天就作廢**
 - [ ] 「沒領到」只在「那天根本沒送出」時發生——**沒有任何補領的路**
 - [ ] 每日簽到的核准者規則與家事相同：**Vicky 直接核准；Aug 先被擋下出現「代替確認」，再按一次才成立**，
       `decidedProxy = true` 且 memo 看得出是代的
-- [ ] 家長端待審清單**分得出兩種 kind**：每日簽到那筆看得到攤開的三個勾選項目與照片，
-      家事那筆看得到家事名稱；**「全部核准今天的每日簽到」一次批掉三筆**
+- [ ] 🚧 **尚未實作**：家長端待審清單**分得出兩種 kind**——每日簽到那筆看得到攤開的三個勾選項目與照片，
+      家事那筆看得到家事名稱；**「全部核准今天的每日簽到」一次批掉三筆**。
+      （現況：`js/admin.js` 的 `KIND_LABEL` 沒有 `allowance_claim`，照片縮圖也只對 `chore_done` 抓，
+      所以簽到那幾筆在待審清單上顯示的是原始 kind 字串、沒有照片。伺服器端該給的都給了。）
 - [ ] 每日簽到的照片進同一個 `HappyBank 家事照片/<kidId>/`，檔名是 `<yyyyMMdd>-allowance-<clientId 前8>.jpg`；
       飛航模式送出後復網補送，**Drive 裡只有一張、只入帳一次**
 - [ ] 離線時每日簽到頁**明白寫出「會算在真正送出去的那一天」**，不是靜靜丟進佇列
 - [ ] **裝置時間調成昨天也不能多領一次**（日界線一律以伺服器的 `Asia/Taipei` 為準）
-- [ ] 家長端 admin 改得動 `users.dailyAllowance`（逐人）與 `config.daily_checklist`
+- [ ] **把平板的日期調成明天，🎁 卡片與家事卡仍照伺服器的 `snapshot.today` 畫**：
+      今天簽到過就寫「✅ 今天領到了」，不會變回「今天還沒領」讓小孩白拍一張照
+- [ ] 🚧 **尚未實作**：家長端 admin 改得動 `users.dailyAllowance`（逐人）與 `config.daily_checklist`
+      （`admin_set_allowance` / `admin_config` 都還沒有，目前只能直接改 Sheet，見 §7.2）
 - [ ] **沒有任何自動發零用錢的行為**：週日早上 8:00 不會有錢自動進帳，
       Apps Script 的觸發條件頁面沒有那支 trigger
 - [ ] 週日早上家長端 admin 首頁看得到「本週待審 ○ 件」提醒（對帳日保留，但與發薪無關）；

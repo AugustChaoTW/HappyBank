@@ -414,10 +414,15 @@ function apiSnapshot(p) {
     gift: num(getConfigValue('rate_gift'), 0)
   };
 
+  // 日界線一律由伺服器說了算：小孩的平板時鐘跑掉（或時區設成別國）時，
+  // 前端自己算「今天」會跟伺服器講不同的日子——畫面說還沒領、按下去卻被
+  // already-claimed 擋掉。前端拿這個值去比對 requests.ts 落在哪一天（SPEC §7.1）。
+  const today = taipeiDay(new Date());
+
   if (user.role === 'kid') {
     ensureDefaultAccounts(user.userId);
     return {
-      ok: true, serverTs: new Date().toISOString(), rates,
+      ok: true, serverTs: new Date().toISOString(), today, rates,
       user: publicUser(user),
       accounts: accountsOf(user.userId),
       ledger: ledgerOf(user.userId, 50),
@@ -431,6 +436,10 @@ function apiSnapshot(p) {
       daily_checklist: dailyChecklistItems(),
       // 小孩要知道自己在等誰，畫面才寫得出「等媽媽確認」而不是寫死一個名字
       chore_approver: String(getConfigValue('chore_approver') || ''),
+      // 自己今天可以領多少。只供顯示——還沒簽到過就沒有 request 可以看金額，
+      // 沒有這個值，🎁 按鈕只能寫「今天還沒領」而寫不出「＋20」。
+      // 真正入帳的金額是核准當下伺服器再查一次的（§9.6）。
+      dailyAllowance: Math.round(num(user.dailyAllowance, 0)),
       chores: readTable('chores')
         .filter(c => isTrue(c.active))
         .filter(c => !c.kidId || String(c.kidId) === user.userId)
@@ -449,7 +458,7 @@ function apiSnapshot(p) {
       };
     });
   return {
-    ok: true, serverTs: new Date().toISOString(), rates,
+    ok: true, serverTs: new Date().toISOString(), today, rates,
     user: publicUser(user), kids,
     // 家事的指定核准者放頂層，admin 才知道自己按下去是正式確認還是代理（SPEC §7.1、§9.5）
     chore_approver: String(getConfigValue('chore_approver') || ''),

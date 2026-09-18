@@ -274,3 +274,66 @@ test('errorMessage：沒對照到的新碼就照講伺服器自己的話', () =>
   assert.match(Allowance.errorMessage('weird-new-code'), /等一下再試/);
   assert.match(Allowance.errorMessage('network'), /網路|連不上/);
 });
+
+// ---------- 日界線以伺服器為準（snapshot.today） ----------
+// 平板時鐘跑掉時，「今天領了沒」不能由裝置決定：
+// 寫「今天還沒領」而伺服器認為領過了，小孩拍完照送出才被 already-claimed 打回來。
+
+const WRONG_CLOCK = new Date(taipei('2026-09-19T10:00:00'));   // 平板以為已經是隔天
+
+test('claimState：裝置時鐘跑到明天，仍照伺服器的 today 算', () => {
+  const r = claim({ status: 'approved', amount: 20, decidedBy: 'vicky' });
+  // 裝置以為是 9/19 → 昨天那筆不算今天 → 會寫「今天還沒領」
+  assert.strictEqual(Allowance.claimState(snap({ requests: [r] }), WRONG_CLOCK).state, 'available');
+  // 伺服器說今天還是 9/18 → 今天已經領到了
+  const server = Allowance.claimState(snap({ requests: [r], today: '2026-09-18' }), WRONG_CLOCK);
+  assert.strictEqual(server.state, 'approved');
+  assert.strictEqual(server.amount, 20);
+});
+
+test('claimState：裝置時鐘停在昨天，也不要把昨天那筆當成今天的', () => {
+  const yesterday = claim({ status: 'approved', amount: 20, ts: taipei('2026-09-17T20:00:00') });
+  const slow = new Date(taipei('2026-09-17T23:00:00'));
+  assert.strictEqual(Allowance.claimState(snap({ requests: [yesterday] }), slow).state, 'approved');
+  assert.strictEqual(
+    Allowance.claimState(snap({ requests: [yesterday], today: '2026-09-18' }), slow).state, 'available',
+    '伺服器說今天是 9/18，昨天領過不影響今天');
+});
+
+test('claimState：舊的離線快照沒有 today 就退回裝置時間（不能整頁空白）', () => {
+  const r = claim({ status: 'pending' });
+  assert.strictEqual(Allowance.claimState(snap({ requests: [r] }), NOW).state, 'pending');
+  assert.strictEqual(Allowance.claimState(snap({ requests: [r], today: '壞掉的值' }), NOW).state, 'pending');
+});
+
+test('homeLabel：伺服器的今天說領過了，按鈕就不准寫「還沒領」', () => {
+  const r = claim({ status: 'approved', amount: 20, decidedBy: 'vicky' });
+  assert.strictEqual(Allowance.homeLabel(snap({ requests: [r] }), WRONG_CLOCK).label, '今天還沒領 →');
+  assert.strictEqual(
+    Allowance.homeLabel(snap({ requests: [r], today: '2026-09-18' }), WRONG_CLOCK).label,
+    '✅ 今天領到了 ＋20');
+});
+
+// ---------- 還沒簽到就先講金額 ----------
+
+test('homeLabel：snapshot 帶了 dailyAllowance，按鈕就寫得出「今天還沒領 ＋20 →」', () => {
+  assert.strictEqual(Allowance.homeLabel(snap({ dailyAllowance: 20 }), NOW).label, '今天還沒領 ＋20 →');
+  // 被退回也一樣看得到還能拿多少
+  const out = Allowance.homeLabel(snap({ requests: [claim({ status: 'rejected' })], dailyAllowance: 20 }), NOW);
+  assert.strictEqual(out.state, 'rejected');
+  assert.match(out.label, /再試一次 →$/);
+});
+
+test('homeLabel：沒帶 dailyAllowance 就不要瞎掰數字', () => {
+  assert.strictEqual(Allowance.homeLabel(snap(), NOW).label, '今天還沒領 →');
+  assert.strictEqual(Allowance.homeLabel(snap({ dailyAllowance: 0 }), NOW).label, '今天還沒領 →');
+});
+
+test('claimState：還沒簽到時的金額來自 snapshot.dailyAllowance', () => {
+  assert.strictEqual(Allowance.claimState(snap({ dailyAllowance: 20 }), NOW).amount, 20);
+  // 舊欄位名（daily_allowance）留著當退路，離線快照才不會突然少一個數字
+  assert.strictEqual(Allowance.claimState(snap({ daily_allowance: 20 }), NOW).amount, 20);
+  // request 上回寫的實付金額優先——那是真的付出去的數字
+  const r = claim({ status: 'approved', amount: 35 });
+  assert.strictEqual(Allowance.claimState(snap({ requests: [r], dailyAllowance: 20 }), NOW).amount, 35);
+});
