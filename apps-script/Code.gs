@@ -358,6 +358,12 @@ function postLedger(opts) {
 
     const acc = findBy('accounts', 'accountId', opts.accountId);
     if (!acc) return { ok: false, error: 'no-account', message: '找不到這個帳戶。' };
+    // 關掉的帳戶一律不能再動。錢進得去但 accountsOf() 會把它濾掉，
+    // 結果是這筆錢在每個畫面上都不見、只剩 ledger 裡有。
+    // matured 的定存要放行，否則到期的錢領不回活期。
+    if (acc.status === 'closed') {
+      return { ok: false, error: 'account-closed', message: '這個帳戶已經關閉了。' };
+    }
 
     const amount = Math.round(num(opts.amount, 0));
     if (!amount) return { ok: false, error: 'zero-amount', message: '金額不能是 0。' };
@@ -500,7 +506,7 @@ function apiAdminGift(p) {
   }
   ensureDefaultAccounts(kidId);
   const gift = readTable('accounts')
-    .filter(a => String(a.kidId) === kidId && a.type === 'gift')[0];
+    .filter(a => String(a.kidId) === kidId && a.type === 'gift' && a.status === 'active')[0];
   if (!gift) return { ok: false, error: 'no-account', message: '找不到紅包帳戶。' };
   return postLedger({
     accountId: gift.accountId, type: 'gift_in', amount: Math.round(num(p.amount, 0)),

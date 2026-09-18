@@ -212,11 +212,7 @@ test('admin_recalc 在資料本來就對的時候不亂改東西', () => {
   assert.strictEqual(res.fixedLedgerRows, 0);
 });
 
-// --------------------------------------------------------------- 已知 bug
-// 標成 todo：它現在是紅的，但紅的是實作不是測試。
-// 修好 apiAdminGift 之後把 { todo: ... } 拿掉。
-
-test('admin_gift 不該把紅包入到已關閉的 gift 帳戶', { todo: '已知 bug，見下方註解' }, () => {
+test('admin_gift 不該把紅包入到已關閉的 gift 帳戶', () => {
   const gs = freshBank();
   const parent = login(gs, 'aug');
   login(gs, 'momo');
@@ -231,12 +227,8 @@ test('admin_gift 不該把紅包入到已關閉的 gift 帳戶', { todo: '已知
   });
   assert.strictEqual(res.ok, true);
 
-  // apiAdminGift 挑帳戶時是
-  //   readTable('accounts').filter(a => a.kidId === kidId && a.type === 'gift')[0]
-  // ——沒有排除 status === 'closed'，而且 postLedger 也不檢查 status
-  // （apiAdminAdjust 有檢查，admin_gift 漏了）。
-  // 結果：600 元入到那個已關閉的帳戶，而 accountsOf() 會把 closed 帳戶濾掉，
-  // 所以這筆錢在小孩端與家長端的畫面上都不見了，只剩 ledger 裡有。
+  // 挑帳戶時若沒排除 closed，錢會入到已關閉的帳戶；
+  // accountsOf() 會把 closed 濾掉，於是這筆錢在所有畫面上消失，只剩 ledger 裡有。
   const active = gs.$.rows('accounts')
     .find(a => a.kidId === 'momo' && a.type === 'gift' && a.status === 'active');
   assert.strictEqual(gs.accountBalance(active.accountId), 600,

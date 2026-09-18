@@ -420,9 +420,10 @@ data/
 - `balance` 是整數元。家長端沒有 `chores`；小孩端沒有 `kids`。
 - 小孩 session 打 snapshot 時，若活期／紅包帳戶還不存在會自動補建。
 - 小孩端的 `requests` 除了 `pending`，還要**額外帶回「今天（或本週）已決定」的 `chore_done`**，
-  含 `status` · `photoUrl` · `decidedTs` · `decidedBy` · `decidedProxy` · `decidedNote`。
+  含 `status` · `photoFileId` · `decidedTs` · `decidedBy` · `decidedProxy` · `decidedNote`。
   沒有這些，chores 頁畫不出「今天已回報 / 媽媽在 9/18 晚上 9:14 確認」的狀態（§6）。
-- 家長端的 `requests` 帶 `photoUrl` 供待審清單畫縮圖，並帶 `chore_approver`
+- 家長端的 `requests` 帶 `photoFileId`（**不是圖片內容**，snapshot 不塞 base64）供待審清單
+  延遲抓縮圖用（§7.6），並帶 `chore_approver`
   （放在頂層，值同 `config.chore_approver`），讓 admin 知道自己按下去是正式確認還是代理。
 
 ### 7.2 `POST`（body JSON）
@@ -472,8 +473,9 @@ data/
    - 比對用的是 `requests.ts`（伺服器寫入時間），**不是前端送的時間**。
      離線補送的照片因此算在「補送當下」那一天——這點要讓小孩知道，
      UI 在離線送出時明寫「等有網路才會送出，會算在送出那天」。
-6. **寫入**：先傳照片到 Drive，再寫 `requests`（`status = 'pending'`、`photoUrl`），
-   **這一步的失敗處理見 §7.5**。回傳 `{ ok:true, requestId, photoUrl }`。
+6. **寫入**：先傳照片到 Drive，再寫 `requests`（`status = 'pending'`、`photoFileId`），
+   **這一步的失敗處理見 §7.5**。回傳 `{ ok:true, requestId, photoFileId }`
+   （回的是檔案 ID，不是網址——檔案是 private 的，見 §5、§7.6）。
 
 **不在這裡入帳。** `chore_done` 一律是 `pending`，錢要等 §9.5 的確認才進 `current`。
 
@@ -522,6 +524,9 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 | `busy` | `LockService` 等 15 秒仍拿不到鎖（多人同時寫入） | 不是失敗也不是成功，**請使用者過幾秒重試**；不要清 session |
 | `photo-required` | 家事回報沒帶照片（或 base64 壞掉） | 回到拍照那一步，顯示「要拍一張照片才能送出喔」 |
 | `photo-too-big` | 照片超過 1.5 MB（前端沒壓縮或壓縮失敗） | 重新壓縮後再送；連兩次失敗就請小孩換一張 |
+| `no-such-request` | `chore_photo` 帶的 `requestId` 不存在 | 重新抓 snapshot；不要重試同一個 id |
+| `not-your-photo` | 小孩想抓**別人**那筆 request 的照片（家長不受限） | 顯示「這不是你的照片」；這是越權，不是暫時性錯誤，**不要重試** |
+| `photo-missing` | `photoFileId` 是空的，或 Drive 上那個檔案已被刪除／移到垃圾桶 | 顯示「照片讀不到」（不是破圖）；家長端**不要因此就順手核准** |
 | `already-reported` | 這件家事在本期間已有 pending/approved | **不要重試、不要進離線佇列**，把該卡片切成「今天已回報」 |
 | `needs-proxy` | 非指定核准者要核准家事，但沒按「代替確認」 | 把按鈕換成「代替 Vicky 確認」，等家長再按一次；**不自動重送** |
 | `already-decided` | 這筆 request 已經被別人決定了 | 重新抓 snapshot，顯示現況 |
@@ -533,7 +538,9 @@ Apps Script 的 `ContentService` **永遠回 HTTP 200**，沒有辦法回真正�
 ### 7.5 照片上傳（base64 → Drive）
 
 同樣的手法在 penghu-explorer 已經跑過一輪（`doPost` → `Utilities.base64Decode` →
-`folder.createFile` → `setSharing`）。這裡照抄**作法**，不共用程式碼。
+`Utilities.newBlob` → `folder.createFile`）。這裡照抄**作法**，不共用程式碼，
+而且**刻意少做最後那一步**：penghu-explorer 建完檔會 `setSharing(ANYONE_WITH_LINK, VIEW)`，
+這裡**不呼叫 `setSharing`**，檔案留在擁有者的 private 資料夾（理由見 §5）。
 
 **前端：送出前一定要壓縮。**
 
@@ -561,15 +568,16 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 
 1. （鎖外）冪等檢查：`requests` 有沒有這個 `clientId`？有 → 直接回傳原結果，結束。
 2. （鎖外）**先在 `HappyBank 家事照片/<kidId>/` 找有沒有同名檔**
-   （檔名含 `clientId` 前 8 碼，見 §5）。有 → 重用它的 URL，不重複建檔。
-   沒有 → `createFile` + `setSharing(ANYONE_WITH_LINK, VIEW)`。
+   （檔名含 `clientId` 前 8 碼，見 §5）。有 → 重用它的 `fileId`，不重複建檔。
+   沒有 → `Utilities.newBlob(Utilities.base64Decode(photo), 'image/jpeg', name)` → `folder.createFile(blob)`。
+   **到此為止，不設任何分享權限。**
 3. （鎖內）重跑一次一天一次檢查 + 冪等檢查，然後 append `requests`。
 
 > ⚠️ **Drive 寫成功、Sheet 寫失敗怎麼辦？**
 > 這個順序下，失敗的後果是 **Drive 裡多一張沒有任何 request 指向的孤兒照片**——
 > 佔空間，但不會有人少拿錢、也不會有人多拿錢。這是刻意選的方向：
 > **寧可多一張照片，也不要出現「Sheet 說做完了、但沒有證據」的 request。**
-> 反過來（先寫 Sheet 再傳照片）會產生 `photoUrl` 空白的 pending，家長看不到證據只能盲審。
+> 反過來（先寫 Sheet 再傳照片）會產生 `photoFileId` 空白的 pending，家長看不到證據只能盲審。
 > 孤兒照片由 §7.3 的 `admin_recalc` 順便回報數量（不自動刪，見 §10）；
 > 而因為檔名帶 `clientId`，離線佇列重送同一筆時會**認出既有檔案並重用**，不會越積越多。
 
@@ -577,6 +585,38 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 **單一佇列項目超過 1 MB 就不要存**，直接告訴小孩「現在沒網路，等一下有網路再報一次」。
 另外 `already-reported` 與 `photo-required` 是**永久性失敗**，收到就把該項目丟出佇列，
 不要無限重試（§7.4）。
+
+### 7.6 `GET ?action=chore_photo&requestId=…&token=…&session=…`
+
+照片是 private 的（§5），瀏覽器拿不到 Drive 檔案，**所有看圖都得經過這支代理端點**。
+
+**授權**（順序固定，任何一條不過就不去讀 Drive）：
+
+1. 沒帶 session／session 過期／找不到帳號 → `unauthorized`（邏輯 401，§7.4）。
+2. `requestId` 查不到 → `no-such-request`。
+3. `session.role === 'kid'` 時，**只能抓自己那筆**：`request.kidId !== session.kidId` → `not-your-photo`。
+   `kidId` 一律取自 session，不接受請求帶（跟 §7.1、§7.2 同一條規矩）。
+   `session.role === 'parent'` 可以抓任何一筆。
+4. `requests.photoFileId` 為空，或 `DriveApp.getFileById()` 丟例外／檔案已在垃圾桶
+   → `photo-missing`（照片被刪掉是可能發生的事，不要回 `server`）。
+
+**回傳**：`ContentService` 只能吐文字，**沒辦法回二進位**，所以圖片一律轉 base64 包在 JSON 裡：
+
+```json
+{ "ok": true, "requestId": "...", "mime": "image/jpeg", "data": "<base64，不含 data: 前綴>" }
+```
+
+伺服器端就是 `Utilities.base64Encode(DriveApp.getFileById(fileId).getBlob().getBytes())`。
+前端拿到後 `img.src = 'data:image/jpeg;base64,' + data`。
+
+> **成本要講清楚：一張照片 = 一趟額外的 Apps Script 往返，實測體感 1～2 秒。**
+> base64 還會讓傳輸量比原檔大約 1.33 倍（壓縮後 150～400 KB → 200～550 KB）。
+> 所以：
+> - **`snapshot` 絕對不夾帶照片**，只給 `photoFileId`。十筆待審全塞 base64 會讓登入變成十秒。
+> - **家長端待審清單一律延遲載入**：先畫佔位框＋spinner，捲進畫面或點開該筆才抓（§6）。
+> - **抓到的 base64 在記憶體快取到登出為止**（key 用 requestId），同一張不抓第二次；
+>   **不寫進 localStorage / IndexedDB**——照片不留在裝置上是這個設計的重點之一。
+> - 失敗不重試第二次以上，直接顯示「照片讀不到」。
 
 ---
 
@@ -683,7 +723,11 @@ Drive 建檔是慢動作（每張數百毫秒到數秒）。若把它包進 §7.
 - **每回報一件家事，就要拍一張照片**。沒有照片不能送出——UI 把按鈕 disable，
   伺服器再擋一次（`photo-required`，§7.2）。這是本功能的核心規則，不是加分項。
 - 照片是給家長「看一眼就知道真的做了」用的，不追求畫質：壓到最長邊 1280px（§7.5）。
-- 照片存 Drive、URL 存 `requests.photoUrl`（§5），**待審清單直接顯示縮圖**（§6）。
+- 照片存 Drive、**檔案 ID** 存 `requests.photoFileId`（§5）。
+  檔案是 **private 的，不對外分享**——要看圖得帶 session 走 `chore_photo`（§7.6），
+  伺服器確認「你是家長，或這就是你自己那筆」才回圖。
+- **待審清單看得到縮圖**（§6），只是縮圖是延遲抓進來的：先 spinner，再換成照片。
+  一張多花 1～2 秒，換到的是「照片不會因為網址外流而外流」。
 - **不強制照片一定拍得出家事**——會不會有小孩拍一張隨便的照片交差？會。
   這不是用程式擋的事，是家長看到爛證據就按退回、順手講一句的事。
   系統要做的只是「讓證據存在、讓家長看得到」。
