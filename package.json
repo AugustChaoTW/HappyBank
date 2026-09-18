@@ -1,0 +1,9 @@
+{
+  "name": "happybank",
+  "version": "0.1.0",
+  "private": true,
+  "description": "小孩零用錢虛擬銀行 — 純靜態前端 + Google Apps Script 後端",
+  "scripts": {
+    "test": "node --test 'test/**/*.test.js'"
+  }
+}

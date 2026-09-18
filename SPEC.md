@@ -227,7 +227,7 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 | decidedBy | string\|null | **實際按下核准／退回的人的 userId**。原本只記時間不記人，代理確認就查不出是誰決定的（見 §9.5） |
 | decidedProxy | bool | 是否為代理確認（核准者不是 `config.chore_approver`）。**寫入當下就記死，不要事後用 `decidedBy !== config.chore_approver` 推導**——`chore_approver` 一旦改過，歷史紀錄就會說謊 |
 | decidedNote | string | 家長回覆（退回時必填，讓小孩知道為什麼） |
-| photoUrl | string\|null | 家事照片在 Google Drive 的連結（見下方「家事照片」）。`kind = chore_done` **必填**；照片二進位內容不進 Sheet |
+| photoFileId | string\|null | 家事照片在 Google Drive 的 **檔案 ID**（不是網址，見下方「家事照片」）。`kind = chore_done` **必填**；照片二進位內容不進 Sheet。要看圖一律走 `GET ?action=chore_photo`（§7.6） |
 | clientId | string | 冪等鍵 |
 
 ### `chores`
@@ -271,19 +271,22 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
   不會在 Drive 裡留下一堆重複檔（見 §7.5）。
 - **格式**：一律 JPEG。前端上傳前必須先壓縮（最長邊 ~1280px、品質 0.8，見 §7.5），
   伺服器不做影像處理。
-- **分享**：`file.setSharing(ANYONE_WITH_LINK, VIEW)`，URL 寫回 `requests.photoUrl`。
-  小孩與家長的瀏覽器沒有登入 Drive，不開連結權限就看不到自己的照片。
-- **一張照片對一筆 request**：`photoUrl` 是一對一，不做相簿、不支援補傳第二張。
+- **權限：不做任何分享。** 建完檔就放著，維持 Drive 預設權限——
+  **只有擁有者（也就是 Sheet／Apps Script 的執行身分）讀得到**，
+  **不呼叫 `setSharing`、不產生任何公開連結**。
+  這是本專案**唯一一處刻意偏離 penghu-explorer 的地方**：
+  那邊上傳的是風景照與作品照，開連結分享是功能（小孩要拿給親戚看）；
+  這裡拍的是家裡室內——廚房、小孩房間、垃圾桶旁邊——不該有一條「知道網址就看得到」的路。
+- **回寫 `fileId`，不是 URL**：`requests.photoFileId` 存 `file.getId()`。
+  存 URL 也沒用——檔案是 private，沒登入 Google 帳號的瀏覽器點開只會看到權限牆。
+  要看圖一律經過伺服器驗身分後代理取圖（§7.6）。
+- **一張照片對一筆 request**：`photoFileId` 是一對一，不做相簿、不支援補傳第二張。
 
-> ⚠️ **風險：`ANYONE_WITH_LINK` 是「知道網址就看得到」，不是「只有我們家看得到」。**
-> 這些是家裡室內的照片（廚房、小孩房間、垃圾桶旁邊），唯一的保護是網址猜不到。
-> 網址會出現在 Sheet、在小孩手機的 localStorage 快照、在家長的瀏覽紀錄裡，
-> 任何一處外流就等於照片外流，而且 Drive 檔案預設**永久存在**。
-> v1 接受這個取捨（照片量小、內容平凡、家用情境），但這是本功能最實質的隱私風險，
-> 要讓家長知道。真正的解法是改走「Apps Script 代理」：檔案保持 private，
-> `photoUrl` 改存 `fileId`，前端帶 session 打 `GET ?action=chore_photo&requestId=…`
-> 由伺服器驗身分後回傳圖片 base64。成本是每張照片多一趟 Apps Script 往返。
-> **何時切換、照片要不要定期刪除，列在 §10。**
+> **還留著的三件事（不是風險警告，是誠實的現況）：**
+> 照片**永久留在 Drive**，v1 沒有自動刪除；
+> **Apps Script 的執行身分讀得到全部照片**（代理取圖就是用這個身分去讀的），
+> 所以「誰看得到」最終等於「誰能存取那個 Google 帳號與那支 Apps Script」；
+> **備份與刪除策略仍未定**，列在 §10。
 
 ---
 
@@ -336,6 +339,11 @@ data/
   weekly 的狀態文字寫「這週已回報」而不是「今天已回報」。
   清單頂端一行小字：「今天已回報 2 件，等確認中 ＋20 元」——讓小孩看得到還沒到手的錢。
 
+  **狀態卡上的照片縮圖**：照片是 private 的，不能直接放 Drive 網址。
+  卡片先畫一個灰底佔位＋spinner，再帶 session 打 `chore_photo`（§7.6）取 base64，
+  拿到才設 `img.src = 'data:image/jpeg;base64,' + data`；抓過的存在記憶體快取（key 為 requestId）。
+  取不到時顯示「照片讀不到」，**不要破圖、也不要因此讓整張卡片消失**。
+
   **拍照流程**：按鈕直接開 `<input type="file" accept="image/*" capture="environment">`
   （不自建相機 UI，交給系統 App）→ 選到檔案後**先在 canvas 壓縮**（§7.5）→
   畫面出現預覽縮圖 + 「重拍」/「送出」。**沒有照片時「送出」是 disabled**，
@@ -345,8 +353,13 @@ data/
 - **history**：全帳戶交易明細，可依帳戶篩選。
 - **admin**：僅 `role = parent` 的 session 可進入（伺服器判定，前端只是隱藏入口）。
   待審清單一鍵核准/退回、手動調帳、**逐個小孩改每週零用錢**（`users.weeklyAllowance`）、編家事、看 `sessions` 踢掉裝置。
-  **家事待審項目多一張照片縮圖**（`<img src="{photoUrl}">`，點下去開大圖），
-  照片載不出來時顯示「照片讀不到」而不是破圖——不要讓家長在看不到證據的情況下順手按核准。
+  **家事待審項目多一張照片縮圖**：照片是 private 的，`<img>` 不能直接指向 Drive，
+  必須帶 session 打 `chore_photo`（§7.6）拿 base64，再塞進 `img.src = 'data:image/jpeg;base64,' + data`。
+  因此縮圖**一律延遲載入**——先畫一個佔位框＋spinner，捲到畫面內（或家長點開該筆）才去抓，
+  **不要一進待審清單就把十張照片一起抓**（一張一趟往返、每趟 1～2 秒，會整頁卡住）。
+  抓過的照片**在記憶體快取到登出為止**（以 requestId 為 key），家長來回捲動不重抓；
+  **不寫進 localStorage**（照片不該落在裝置上）。
+  照片讀不到時顯示「照片讀不到」而不是破圖——不要讓家長在看不到證據的情況下順手按核准。
   若登入者不是 `config.chore_approver`，家事項目的主要按鈕變成**「代替 Vicky 確認」**（見 §9.5）。
 
 ---
