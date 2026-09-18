@@ -134,5 +134,6 @@ function seedUsers() {
   upsertUser('momo',   'kid',    'Momo', '👧', 'CHANGE-ME', 50);
   upsertUser('coco',   'kid',    'Coco', '👧', 'CHANGE-ME', 50);
   upsertUser('dodo',   'kid',    'Dodo', '👦', 'CHANGE-ME', 50);
-  upsertUser('parent', 'parent', '爸爸', '🧑', 'CHANGE-ME', 0);
+  upsertUser('parent', 'parent', '爸爸',  '🧑', 'CHANGE-ME', 0);
+  upsertUser('vicky',  'parent', 'Vicky', '👩', 'CHANGE-ME', 0);
 }
