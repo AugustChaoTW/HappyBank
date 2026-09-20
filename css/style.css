@@ -35,7 +35,8 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 /* --- 品牌 --- */
 .brand { text-align: center; margin: 12px 0 28px; }
 .brand-logo {
-  display: block; width: min(100%, 230px); height: auto;
+  display: block; width: min(100%, 180px); max-height: 25vh; height: auto;
+  object-fit: contain;
   margin: 0 auto 10px; border-radius: 18px;
 }
 .brand h1 { font-size: 1.7rem; color: var(--c-brand-dark); margin-top: 6px; letter-spacing: 0.02em; }
