@@ -239,6 +239,15 @@ setup 完成：users, credentials, sessions, accounts, ledger, requests, chores,
 
 ## 8. 🔁 改過 Code.gs 之後**一定要重新部署**
 
+**更新部署也必須使用資料庫擁有者 `aug.chao@gmail.com`。** 先確認右上角 Google
+帳號，以及部署視窗的「執行身分：我」後面都是這個帳號。不要用其他家長的 Google
+帳號更新正式部署：登入會寫入受保護的 `credentials` 分頁，僅有一般試算表編輯權
+仍不足以完成登入。
+
+若孩子登入看到 `You are trying to edit a protected cell or object`，先檢查部署帳號。
+改用擁有者登入，在同一筆部署選「編輯」，保持「執行身分：我（aug.chao@gmail.com）」
+並重新部署。不要移除 `credentials` 的保護，也不要執行 `seedUsers()` 重設密碼。
+
 **這是最常見的「我明明改了，怎麼完全沒反應」的原因。**
 
 Apps Script 的 Web App 網址對應的是一個**凍結的版本快照**，不是你編輯器裡的當前程式碼。

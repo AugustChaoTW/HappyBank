@@ -6,7 +6,8 @@
 
 新增家長「分身查看」：家長首頁可選孩子查看餘額、今日簽到、家事狀態、
 所有待審與最近交易；維持家長 session，僅供查看，不代孩子提交或自動入帳。
-需重新部署 `apps-script/Code.gs` 才能使用（不需改表或執行 `seedUsers()`）。
+已部署後端 v3；2026-10-19 已由 `aug.chao@gmail.com` 重新部署，修復其他帳號部署後
+登入無法寫入受保護 `credentials` 的權限問題。孩子登入實測待確認。
 
 小孩每天簽到／回報家事 → 拍照 → 媽媽確認 → 錢進活期。這條主線已經完整可用；
 定存、儲蓄目標、提領、利息結算都還只有規格，沒有程式。
@@ -18,15 +19,16 @@
 | 網站 | https://augustchaotw.github.io/HappyBank/ （GitHub Pages，push 即自動更新） |
 | Repo | https://github.com/AugustChaoTW/HappyBank （public） |
 | 資料庫 | Google Sheet `1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`（**不要分享給任何人**，見 SPEC §8.1） |
-| 後端 | Apps Script Web App，**部署版本 v2（09-18 12:13）** |
+| 後端 | Apps Script Web App，**部署版本 v3（2026-10-19），由 aug.chao@gmail.com 更新部署** |
 
 ## ⚠️ 線上落後於 repo
 
-`apps-script/` 在 v2 之後有三個 commit 還沒部署：
+以下是 v2 時期記錄的待同步項目；v3 只針對線上 Code.gs 加入分身查詢，未整份覆蓋檔案。
+已確認 v3 含伺服器日期判定，其他項目仍需逐項核對：
 
 - `5f86d26` 家事做法說明（`chores` 多一欄 `description`）
 - `4ea8cf4` 待審清單支援每日零用錢（家長快照 `kids[].dailyAllowance`）
-- `2303f0c` 伺服器判定「今天」
+- `2303f0c` 伺服器判定「今天」（v3 已確認包含）
 
 **在部署前，Vicky 的待審清單看不到簽到那筆的金額。**
 部署步驟：貼 `Code.gs` + `Setup.gs` → 跑 `setup()` → Deploy → Manage deployments → ✏️ → New version。
