@@ -463,6 +463,17 @@ Sheet ID：`1Po7HzNFbi90EvLuKpor69CuMAoU_nYjbUMh-RsBEOvo`
 
 ## 6. 前端結構
 
+### 家長分身查看
+
+家長首頁每位孩子提供「分身查看」入口，可切換孩子並重新整理。顯示該孩子的
+帳戶餘額、今日每日零用錢狀態、家事進度、包含跨日申請的待審清單及最近交易。
+此功能唯讀，保留原家長 session，不建立孩子 session、不儲存孩子快照、
+不提供提交、取消或審核按鈕。返回家長首頁後才使用原有家長操作。
+
+`GET snapshot` 新增可選 `kidId`：只有家長 session 可選擇 active 的 kid；
+回傳與孩子快照相同的資料及 `preview: true`。不存在、停用或非孩子帳號回
+`no-such-kid`。孩子 session 一律忽略 `kidId`，仍只能看自己的資料。
+
 ```
 index.html              已實作的 view id：view-pick / view-pw / view-home / view-chores /
                         view-allowance（每日簽到）/ view-admin

@@ -121,6 +121,19 @@
   </section>
 
   <!-- 照片放大：待審清單的縮圖太小，看不清楚就不該按核准 -->
+  <section id="view-kid-preview" class="view hidden">
+    <div class="page-head">
+      <button class="btn-back" id="btn-preview-back">← 回家長首頁</button>
+      <h2>👀 分身查看</h2>
+    </div>
+    <p class="banner">家長查看模式 · 送出申請與審核請回原本的頁面操作</p>
+    <label for="preview-kid">選擇孩子</label>
+    <select id="preview-kid"></select>
+    <button class="btn-text" id="btn-preview-refresh">重新整理</button>
+    <div id="preview-body" aria-live="polite"></div>
+    <p id="preview-fresh" class="freshness"></p>
+  </section>
+
   <div id="photo-modal" class="photo-modal hidden">
     <img id="photo-modal-img" alt="家事照片">
   </div>
@@ -138,6 +151,7 @@
   <script src="js/allowance.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/home.js"></script>
+  <script src="js/kid-preview.js"></script>
   <script src="js/login.js"></script>
   <script src="js/version.js"></script>
   <script src="js/zhuyin.js"></script>

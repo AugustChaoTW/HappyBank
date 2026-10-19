@@ -379,6 +379,14 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 }
 .adm-kid-accts b { color: var(--c-text); }
 
+.adm-kid [data-preview-kid] { margin-top: 12px; }
+#preview-kid {
+  display: block; width: 100%; margin: 8px 0; padding: 12px;
+  font: inherit; border: 1px solid var(--c-brand); border-radius: 12px;
+  background: white; color: var(--c-text);
+}
+#preview-body .tx { gap: 12px; flex-wrap: wrap; }
+
 .adm-hero {
   display: flex; align-items: center; gap: 12px;
   background: var(--c-card); border-radius: var(--radius); box-shadow: var(--shadow);

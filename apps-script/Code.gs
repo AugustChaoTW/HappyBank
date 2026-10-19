@@ -405,7 +405,17 @@ function accountBalance(accountId) {
 // ---------------------------------------------------------------- snapshot
 
 function apiSnapshot(p) {
-  const user = requireSession(p);
+  let user = requireSession(p);
+  const preview = user.role === 'parent' && !!String(p.kidId || '').trim();
+  if (preview) {
+    const kidId = String(p.kidId).trim().toLowerCase();
+    const kid = findBy('users', 'userId', kidId);
+    if (!kid || kid.role !== 'kid' || !isTrue(kid.active)) {
+      return { ok: false, error: 'no-such-kid', message: '找不到這位孩子。' };
+    }
+    // 只切換快照的對象，不建立孩子 session，也不改變任何寫入 API 的權限。
+    user = kid;
+  }
 
   const rates = {
     current: num(getConfigValue('rate_current'), 0.05),
@@ -424,6 +434,7 @@ function apiSnapshot(p) {
     return {
       ok: true, serverTs: new Date().toISOString(), today, rates,
       user: publicUser(user),
+      ...(preview ? { preview: true } : {}),
       accounts: accountsOf(user.userId),
       ledger: ledgerOf(user.userId, 50),
       // pending 之外，還要帶「本期間已決定」的 chore_done——

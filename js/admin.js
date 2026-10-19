@@ -738,6 +738,7 @@ const Admin = (() => {
             <span class="adm-kid-total">${fmt(k.total)} <small>元</small></span>
           </div>
           <ul class="adm-kid-accts">${accts || '<li class="empty">還沒有帳戶</li>'}</ul>
+          <button class="btn-primary" data-preview-kid="${esc(ku.userId)}">👀 分身查看 ${esc(ku.displayName || ku.userId)}</button>
         </div>`;
     }).join('');
 
@@ -777,6 +778,8 @@ const Admin = (() => {
 
       if (hit('#btn-admin')) return open();
       if (hit('#btn-admin-back')) return back();
+      const preview = hit('[data-preview-kid]');
+      if (preview) return KidPreview.open(preview.dataset.previewKid, snapshot.kids);
 
       const modal = hit('#photo-modal');
       if (modal) return el('photo-modal').classList.add('hidden');
